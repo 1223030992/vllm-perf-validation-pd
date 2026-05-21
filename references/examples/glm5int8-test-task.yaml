@@ -1,0 +1,56 @@
+task:
+  name: vllm_perf_glm5int8
+  run_id: auto
+  owner: liuzhihuan
+  description: "GLM-5-W8A8 custom smoke"
+
+mode: single
+
+paths:
+  skill_host_root: /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single
+  skill_container_root: /mnt/.claude/skills/vllm-perf-validation-single
+  output_host_root: /public/home/liuzhh8/skilltest/vllm-perf-validation-single
+  output_container_root: /mnt/skilltest/vllm-perf-validation-single
+
+image:
+  name: null
+  pull_policy: if_not_present
+
+node:
+  ip: null
+  dcu_type: null
+  gpu_count: 8
+
+container:
+  name_template: "lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>"
+
+models:
+  - name: "GLM-5-W8A8"
+    model_short: "glm5int8"
+    host_model_path: /public/opendas/DL_DATA/llm-models/vllm-w8a8-models/GLM-5-W8A8
+    container_model_path: /model/vllm-w8a8-models/GLM-5-W8A8
+    served_model_id: null
+    bench_model_id: null
+    tp: 8
+    port: 9349
+    gpu_range: "0,1,2,3,4,5,6,7"
+    service_script: scripts/server-scripts/run_glm5-w8a8-server.sh
+
+service:
+  health_check:
+    endpoint: /v1/chat/completions
+    timeout_seconds: 2400
+
+test:
+  mode: custom
+  params:
+    input_lens: "512"
+    output_len: 32
+    concurrencies: "1"
+    num_prompts_mult: 1
+    percentiles: "50,95,99"
+
+output:
+  work_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs
+  report_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/reports
+  csv_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/csvs
