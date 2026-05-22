@@ -8,7 +8,7 @@ GitHub: [1223030992/vllm-perf-validation-single](https://github.com/1223030992/v
 
 - 已稳定：GLM-4.7-W8A8 single custom 主链路。
 - 已冒烟：Kimi-K2.5-INT4 single custom。
-- 本轮新增：pchit 目标命中率预热闭环。
+- 本轮新增：pchit 目标命中率预热闭环(待测试)。
 - 待深测：serial、parallel、full、engin、更多非 GLM 模型。
 
 ## 1. 快速理解路径
