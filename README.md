@@ -155,10 +155,10 @@ vllm-perf-validation-single/
 | single custom GLM-4.7-W8A8 | stable | 主链路已稳定跑通 |
 | single custom Kimi-K2.5-INT4 | smoke passed | 10.16.1.9 冒烟通过 |
 | GLM-5-W8A8 | integrated | 已接入脚本和 profile，仍需继续回归 |
-| GLM-5.1 | integrated | 脚本已修正为 `slimquant_marlin`，仍需继续回归 |
+| GLM-5.1 | pchit smoke passed | single pchit 已在 10.16.1.9 跑通 |
 | MiniMax-M2.5-W8A8 | registered | 已注册，真实冒烟待补充 |
 | 新模型标准化注册 | usable | 已支持标准化脚本、注册 profile/example、输出 dry-run |
-| pchit | new / needs validation | 已实现预热闭环，需要真实节点验证 |
+| pchit | smoke passed | GLM-5.1 已完成 90% 目标命中率实测 |
 | serial / parallel | experimental | 有规则和示例，未标记稳定 |
 
 ## 5. 现有模型支持
@@ -167,7 +167,7 @@ vllm-perf-validation-single/
 | --- | --- | ---: | ---: | --- | --- |
 | GLM-4.7-W8A8 | `glm47int8` | 9348 | 8 | int8 | stable |
 | GLM-5-W8A8 | `glm5int8` | 9349 | 8 | int8 | integrated |
-| GLM-5.1-Channel-INT8 | `glm51int8` | 9350 | 8 | int8 | integrated |
+| GLM-5.1-Channel-INT8 | `glm51int8` | 9350 | 8 | int8 | pchit smoke passed |
 | MiniMax-M2.5-W8A8 | `minimaxm25int8` | 9352 | 8 | int8 | registered |
 | Kimi-K2.5-INT4 | `kimik25int4` | 9354 | 8 | int4 | smoke passed |
 
@@ -425,6 +425,50 @@ pchit 与 custom 最大差异在于正式测试前必须先预热 prefix cache�
 - Markdown 报告：`/public/home/liuzhh8/skilltest/vllm-perf-validation-single/reports/kimik25int4-custom-20260522-lzh-agent-test-0522-kimik25int4-2540.md`
 
 补充：`10.16.1.4` 上一次尝试因 GPU 显存已有占用，进程退出 `137`，不视为 Kimi 注册流程失败。
+
+### 8.3 GLM-5.1-Channel-INT8 pchit 冒烟
+
+- 节点：`10.16.1.9`
+- 镜像：`10.16.1.152:5000/jenkins/model_test_env/vllm:0.15.1-ubuntu22.04-dtk26.04-py3.10-20260515-1239`
+- 模型 profile：`glm51int8`
+- 模式：single pchit
+- 端口：`9350`
+- served_model_id：`/model1/GLM-5.1-Channel-INT8`
+- 状态：PASS，最终 `STOPPED`，端口已释放
+- 权限表现：只调用一条绝对路径主入口，无额外权限询问
+
+测试配置：
+
+- 正式测试：`input_len=2048`，`output_len=1024`，`batches=1,2,3,4,5,6,7,8`，`concurrency_multiplier=1`
+- 目标命中率：`pc_hit_target=90`
+- 达标条件：`observed >= 90 - 1 = 89`
+- 预热策略：`warmup_cache_hit_rates=92,95`，`warmup_concurrency_multiplier=4`
+- 预热结果：`PCHIT_WARMUP_STATUS=PASS`，最终 observed PC hit 为 `89.6%`，使用 `95%` warmup 达标
+- 预热轮次：`2`
+- 预热耗时：`3060s`
+
+batch=8 核心指标：
+
+| 指标 | 值 |
+| --- | ---: |
+| QPS | 0.13 req/s |
+| 输出 token 吞吐 | 133.24 tok/s |
+| 总 token 吞吐 | 399.73 tok/s |
+| Mean TTFT | 581.10 ms |
+| P99 TTFT | 644.84 ms |
+| Mean TPOT | 46.71 ms |
+| P99 ITL | 85.22 ms |
+| Speculative acceptance | 17.08% |
+
+产物路径：
+
+- `state.json`：`/public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs/GLM-5.1-Channel-INT8-pchit-20260522-lzh-agent-test-0522-glm51int8-61d9/state.json`
+- CSV：`/public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs/GLM-5.1-Channel-INT8-pchit-20260522-lzh-agent-test-0522-glm51int8-61d9/csvs/pchit/all.csv`
+- JSON 报告：`/public/home/liuzhh8/skilltest/vllm-perf-validation-single/reports/glm51int8-pchit-20260522-lzh-agent-test-0522-glm51int8-61d9.json`
+- Markdown 报告：`/public/home/liuzhh8/skilltest/vllm-perf-validation-single/reports/glm51int8-pchit-20260522-lzh-agent-test-0522-glm51int8-61d9.md`
+- Server log：`/public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs/GLM-5.1-Channel-INT8-pchit-20260522-lzh-agent-test-0522-glm51int8-61d9/logs/glm51int8-0522-vllm-server.log`
+
+注意：本次 `pc_hit_timeout=1800`，但最终预热耗时为 `3060s`。当前实现是在每轮预热前检查 timeout，单轮 benchmark 本身不会被强制中断；如果后续需要严格墙钟超时，需要单独增强 `pchit_warmup.sh`。
 
 ## 9. 常见问题处理
 
