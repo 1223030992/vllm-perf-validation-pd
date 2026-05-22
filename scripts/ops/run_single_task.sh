@@ -4,6 +4,9 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
+  run_single_task.sh --profile PROFILE_OR_SHORT --node NODE --image IMAGE \
+    --test-mode custom|pchit [test options]
+
   run_single_task.sh --node NODE --image IMAGE --model-name NAME --model-short SHORT \
     --host-model-path PATH --container-model-path PATH --server-script SCRIPT \
     --port PORT --tp TP --gpu-range RANGE --test-mode custom \
@@ -17,6 +20,7 @@ Usage:
     --batches "1,2,3,4,5,6,7,8" [--warmup-cache-hit-rates "92,95"]
 
 Common options:
+  --profile PROFILE_OR_SHORT
   --date MMDD
   --image-prefix PREFIX
   --container NAME
@@ -76,6 +80,96 @@ extract_value() {
   grep -E "^${key}=" "$file" | tail -1 | cut -d= -f2-
 }
 
+resolve_profile_path() {
+  local profile="$1"
+  if [[ -f "$profile" ]]; then
+    printf '%s\n' "$profile"
+    return 0
+  fi
+  if [[ -f "${SKILL_ROOT}/references/profiles/${profile}" ]]; then
+    printf '%s\n' "${SKILL_ROOT}/references/profiles/${profile}"
+    return 0
+  fi
+  if [[ -f "${SKILL_ROOT}/references/profiles/${profile}.yaml" ]]; then
+    printf '%s\n' "${SKILL_ROOT}/references/profiles/${profile}.yaml"
+    return 0
+  fi
+  echo "profile not found: $profile" >&2
+  echo "expected file path or short name under ${SKILL_ROOT}/references/profiles/" >&2
+  return 2
+}
+
+load_profile_shell_vars() {
+  local profile_path="$1"
+  python3 - "$profile_path" <<'PY'
+import shlex
+import sys
+
+path = sys.argv[1]
+section = None
+values = {}
+
+def clean(value):
+    value = value.strip()
+    if value in ("null", "None", "~"):
+        return ""
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        value = value[1:-1]
+    return value
+
+with open(path, "r", encoding="utf-8") as fh:
+    for raw in fh:
+        line = raw.rstrip("\n")
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not line.startswith(" ") and stripped.endswith(":"):
+            section = stripped[:-1]
+            continue
+        if section not in ("model", "resource", "service"):
+            continue
+        if ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        values[(section, key.strip())] = clean(value)
+
+mapping = {
+    "PROFILE_MODEL_NAME": values.get(("model", "display_name"), ""),
+    "PROFILE_MODEL_SHORT": values.get(("model", "short_name"), ""),
+    "PROFILE_HOST_MODEL_PATH": values.get(("model", "host_model_path"), ""),
+    "PROFILE_CONTAINER_MODEL_PATH": values.get(("model", "container_model_path"), ""),
+    "PROFILE_PORT": values.get(("resource", "default_port"), ""),
+    "PROFILE_TP": values.get(("resource", "default_tp"), ""),
+    "PROFILE_SERVER_SCRIPT": values.get(("service", "script"), ""),
+}
+
+for key, value in mapping.items():
+    print("%s=%s" % (key, shlex.quote(value)))
+PY
+}
+
+resolve_server_script_for_container() {
+  local script="$1"
+  local marker="/.claude/skills/vllm-perf-validation-single/"
+  if [[ -z "$script" ]]; then
+    return 0
+  fi
+  if [[ "$script" == "$SKILL_CONTAINER_ROOT"* ]]; then
+    printf '%s\n' "$script"
+    return 0
+  fi
+  if [[ "$script" == /* ]]; then
+    if [[ "$script" == *"$marker"* ]]; then
+      printf '%s/%s\n' "${SKILL_CONTAINER_ROOT%/}" "${script#*${marker}}"
+    else
+      printf '%s\n' "$script"
+    fi
+  else
+    script="${script#./}"
+    printf '%s/%s\n' "${SKILL_CONTAINER_ROOT%/}" "$script"
+  fi
+}
+
 run_step_capture() {
   local name="$1"
   local outfile="$2"
@@ -92,6 +186,8 @@ run_step_capture() {
 
 NODE=""
 IMAGE=""
+PROFILE=""
+PROFILE_PATH=""
 MODEL_NAME=""
 MODEL_SHORT=""
 HOST_MODEL_PATH=""
@@ -145,6 +241,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --node) NODE="$2"; shift 2 ;;
     --image) IMAGE="$2"; shift 2 ;;
+    --profile) PROFILE="$2"; shift 2 ;;
     --model-name) MODEL_NAME="$2"; shift 2 ;;
     --model-short) MODEL_SHORT="$2"; shift 2 ;;
     --host-model-path) HOST_MODEL_PATH="$2"; shift 2 ;;
@@ -185,6 +282,18 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
+
+if [[ -n "$PROFILE" ]]; then
+  PROFILE_PATH="$(resolve_profile_path "$PROFILE")"
+  eval "$(load_profile_shell_vars "$PROFILE_PATH")"
+  [[ -n "$MODEL_NAME" ]] || MODEL_NAME="$PROFILE_MODEL_NAME"
+  [[ -n "$MODEL_SHORT" ]] || MODEL_SHORT="$PROFILE_MODEL_SHORT"
+  [[ -n "$HOST_MODEL_PATH" ]] || HOST_MODEL_PATH="$PROFILE_HOST_MODEL_PATH"
+  [[ -n "$CONTAINER_MODEL_PATH" ]] || CONTAINER_MODEL_PATH="$PROFILE_CONTAINER_MODEL_PATH"
+  [[ -n "$SERVER_SCRIPT" ]] || SERVER_SCRIPT="$PROFILE_SERVER_SCRIPT"
+  [[ -n "$PORT" ]] || PORT="$PROFILE_PORT"
+  [[ -n "$TP" ]] || TP="$PROFILE_TP"
+fi
 
 for var in NODE IMAGE MODEL_NAME MODEL_SHORT HOST_MODEL_PATH CONTAINER_MODEL_PATH SERVER_SCRIPT PORT TP GPU_RANGE TEST_MODE; do
   [[ -n "${!var}" ]] || { echo "missing required argument: ${var}" >&2; exit 2; }
@@ -244,6 +353,9 @@ echo "CONTAINER_NAME=$CONTAINER"
 echo "IMAGE_PREFIX=$IMAGE_PREFIX"
 echo "OPS_VERSION=$OPS_VERSION"
 echo "ENTRYPOINT=$0"
+if [[ -n "$PROFILE_PATH" ]]; then
+  echo "PROFILE=$PROFILE_PATH"
+fi
 echo "REPORT_DIR=$REPORT_DIR"
 echo "READY_TIMEOUT=$TIMEOUT"
 
@@ -275,6 +387,7 @@ Key parameters:
   HOST_MODEL_PATH=$HOST_MODEL_PATH
   CONTAINER_MODEL_PATH=$CONTAINER_MODEL_PATH
   SERVER_SCRIPT=$SERVER_SCRIPT
+  SERVER_SCRIPT_CONTAINER=$(resolve_server_script_for_container "$SERVER_SCRIPT")
   PORT=$PORT
   TP=$TP
   GPU_RANGE=$GPU_RANGE

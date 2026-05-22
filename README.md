@@ -177,7 +177,24 @@ vllm-perf-validation-single/
 
 下面模板用于复制给 Claude。模板中 `<user>`、节点、镜像、路径和端口要替换成实际值。
 
-### 6.1 新模型标准化注册
+### 6.1 现有模型 profile 模式
+
+如果模型已经在 `references/profiles/` 中注册，优先使用 `--profile <MODEL_SHORT>`。这样 Claude 不需要读取 profile、列目录或手工拼模型路径。
+
+```text
+/vllm-perf-validation-single
+
+请只调用一条绝对路径主入口 run_single_task.sh，并使用 --profile <MODEL_SHORT> 自动读取已注册模型信息。
+
+要求：
+1. 不要读取 profile 文件。
+2. 不要单独执行 preflight。
+3. 不要手写远端命令、容器命令、benchmark 命令或 API 探测命令。
+4. server script 由 profile 自动解析，必须保持相对路径形式。
+5. 先执行 --dry-run；我确认后再执行真实测试。
+```
+
+### 6.2 新模型标准化注册
 
 ```text
 /vllm-perf-validation-single
@@ -207,7 +224,7 @@ precision: <MODEL_PRECISION>
 7. 输出生成的 profile/example 路径和 run_single_task.sh --dry-run 命令。
 ```
 
-### 6.2 single custom 冒烟测试
+### 6.3 single custom 冒烟测试
 
 ```text
 /vllm-perf-validation-single
@@ -243,7 +260,7 @@ timeout=2400
 7. 禁止 docker rm。
 ```
 
-### 6.3 pchit 90% 目标命中率测试
+### 6.4 pchit 90% 目标命中率测试
 
 ```text
 /vllm-perf-validation-single
@@ -284,7 +301,71 @@ pc_hit_interval=60
 6. 不手写远端命令、容器命令、benchmark 命令或 API 探测命令。
 ```
 
-### 6.4 SERVICE_TIMEOUT 后恢复
+### 6.5 GLM-5.1 pchit 实测模板
+
+下面是 GLM-5.1-Channel-INT8 在 `10.16.1.9` 上测试 pchit 的推荐 prompt。重点是让 Claude 直接调用 `run_single_task.sh --profile glm51int8`，不要再读取 profile 或拼 `/public2` 路径。
+
+```text
+/vllm-perf-validation-single
+
+我授权你执行 GLM-5.1-Channel-INT8 single pchit 测试。
+
+要求：
+1. 只能调用一条绝对路径主入口：
+   bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ...
+2. 必须使用 --profile glm51int8 自动读取模型信息。
+3. 不要读取 profile 文件，不要 ls/grep，不要单独 preflight。
+4. 不要手写远端命令、容器命令、benchmark 命令或 API 探测命令。
+5. 服务启动后必须通过 /v1/models 发现 served_model_id，benchmark 必须使用 served_model_id。
+6. pchit 必须先预热，解析 server log 的 PC 实时命中率。
+7. observed >= pc_hit_target - pc_hit_tolerance 后再执行正式 benchmark。
+8. 92% 预热不达标再尝试 95%；仍不达标则失败并汇报。
+9. 结束后停止容器，生成 state.json、CSV、JSON、Markdown 报告并汇总路径。
+10. 禁止 docker rm。
+
+测试参数：
+node: 10.16.1.9
+image: 10.16.1.152:5000/jenkins/model_test_env/vllm:0.15.1-ubuntu22.04-dtk26.04-py3.10-20260515-1239
+profile: glm51int8
+test_mode: pchit
+gpu_range: 0,1,2,3,4,5,6,7
+input_len: 2048
+output_len: 1024
+batches: 1,2,3,4,5,6,7,8
+concurrency_multiplier: 1
+pc_hit_target: 90
+warmup_cache_hit_rates: 92,95
+warmup_concurrency_multiplier: 4
+pc_hit_tolerance: 1
+pc_hit_timeout: 1800
+pc_hit_interval: 60
+timeout: 2400
+```
+
+Claude 应执行的唯一命令形态如下，真实执行前可先加 `--dry-run`：
+
+```text
+bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh \
+  --node 10.16.1.9 \
+  --image 10.16.1.152:5000/jenkins/model_test_env/vllm:0.15.1-ubuntu22.04-dtk26.04-py3.10-20260515-1239 \
+  --profile glm51int8 \
+  --gpu-range 0,1,2,3,4,5,6,7 \
+  --test-mode pchit \
+  --input-len 2048 \
+  --output-len 1024 \
+  --batches 1,2,3,4,5,6,7,8 \
+  --concurrency-multiplier 1 \
+  --pc-hit-target 90 \
+  --warmup-cache-hit-rates 92,95 \
+  --warmup-concurrency-multiplier 4 \
+  --pc-hit-tolerance 1 \
+  --pc-hit-timeout 1800 \
+  --pc-hit-interval 60 \
+  --timeout 2400 \
+  --assume-yes
+```
+
+### 6.6 SERVICE_TIMEOUT 后恢复
 
 ```text
 /vllm-perf-validation-single

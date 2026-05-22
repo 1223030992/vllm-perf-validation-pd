@@ -30,16 +30,26 @@ quote_sh() {
 
 resolve_server_script() {
   local script="$1"
+  local marker="/.claude/skills/vllm-perf-validation-single/"
   if [[ -z "$script" ]]; then
     echo "服务启动脚本不能为空" >&2
     return 2
   fi
-  if [[ "$script" == /* ]]; then
+  if [[ "$script" == "$SKILL_CONTAINER_ROOT"* ]]; then
     printf '%s\n' "$script"
-  else
-    script="${script#./}"
-    printf '%s/%s\n' "${SKILL_CONTAINER_ROOT%/}" "$script"
+    return 0
   fi
+  if [[ "$script" == /* ]]; then
+    if [[ "$script" == *"$marker"* ]]; then
+      printf '%s/%s\n' "${SKILL_CONTAINER_ROOT%/}" "${script#*${marker}}"
+      return 0
+    fi
+    echo "unsupported absolute server script path: $script" >&2
+    echo "please pass a relative path like scripts/server-scripts/run_xxx.sh, or a container path under ${SKILL_CONTAINER_ROOT}" >&2
+    return 2
+  fi
+  script="${script#./}"
+  printf '%s/%s\n' "${SKILL_CONTAINER_ROOT%/}" "$script"
 }
 
 to_host_path() {
