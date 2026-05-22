@@ -233,3 +233,19 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 - 新增非 GLM 模型时，`register_model.sh` 不再默认 `TP=8`。必须显式传 `--tp`，或由 server script 中的 `-tp 2`、
   `--tensor-parallel-size 2`、`export TP_SIZE=2`、`export TP=2` 推导。若推导出 `TP=2` 且未传 `--gpu-range`，默认 `GPU_RANGE=0,1`。
 - 正式注册非参数化 server script 默认失败；只有显式传 `--allow-static-server-script` 才允许保留静态脚本。
+## 新模型标准化
+
+新增模型时优先按以下顺序执行：
+
+1. 使用绝对路径入口 `standardize_server_script.sh --dry-run` 检查 server script 标准化 diff。
+2. 去掉 `--dry-run` 标准化 server script。
+3. 使用 `register_model.sh --dry-run` 检查 profile/example 和 `run_single_task.sh --dry-run` 命令。
+4. 正式注册后再用 `run_single_task.sh` 做 single custom 冒烟。
+
+标准化入口：
+
+```bash
+bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/standardize_server_script.sh ...
+```
+
+标准化后的 server script 必须使用 `MODEL_PATH`、`PORT`、`TP_SIZE`、`GPU_RANGE` 变量，不要保留硬编码模型路径、端口、TP 或 GPU 列表。`register_model.sh` 发现未标准化脚本时会输出 `NEXT_STEP_STANDARDIZE_CMD`，正式注册默认失败；只有用户明确接受静态脚本时才传 `--allow-static-server-script`。

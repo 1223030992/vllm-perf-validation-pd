@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Register a new model profile/example for the vLLM perf validation skill.
+"""Register a model profile/example for the vLLM perf validation skill.
 
 This script is intentionally local-only: it never connects to SSH, Docker, or GPUs.
 It is Python 3.6 compatible because some target hosts only provide Python 3.6.
@@ -22,22 +22,43 @@ RUN_SINGLE_TASK = (
     "/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/"
     "scripts/ops/run_single_task.sh"
 )
+STANDARDIZE_SERVER_SCRIPT = (
+    "/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/"
+    "scripts/ops/standardize_server_script.sh"
+)
 
 
 def normalize_name(name):
     return name.strip().strip("/")
 
 
-def detect_precision(model_name):
-    upper = model_name.upper()
+def detect_precision_from_text(text):
+    upper = text.upper()
+    if "INT4" in upper or "W4A8" in upper or "W4A16" in upper:
+        return "int4"
     if "W8A8" in upper or "INT8" in upper:
         return "int8"
     if "W8A16" in upper or "FP8" in upper:
         return "fp8"
-    return "bf16"
+    return None
+
+
+def infer_precision(model_name, service_script, explicit_precision=None):
+    """Return model/weight precision, not compute dtype."""
+    if explicit_precision:
+        return explicit_precision, False
+    detected = detect_precision_from_text(model_name)
+    if detected:
+        return detected, False
+    detected = detect_precision_from_text(Path(service_script).name)
+    if detected:
+        return detected, False
+    return "bf16", True
 
 
 def precision_suffix(precision):
+    if precision == "int4":
+        return "int4"
     if precision == "int8":
         return "int8"
     if precision == "fp8":
@@ -51,8 +72,7 @@ def clean_version(version):
 
 def derive_model_short(model_name, precision=None):
     name = normalize_name(model_name)
-    precision = precision or detect_precision(name)
-    suffix = precision_suffix(precision)
+    suffix = precision_suffix(precision or "bf16")
 
     m = re.search(r"(?i)\bGLM-([0-9]+(?:\.[0-9]+)?)", name)
     if m:
@@ -62,15 +82,20 @@ def derive_model_short(model_name, precision=None):
     if m:
         return "qwen{}b{}{}".format(clean_version(m.group(1)), m.group(2), suffix)
 
-    m = re.search(
-        r"(?i)\bDeepSeek-R1-Distill-([A-Za-z0-9.]+)-([0-9]+)B",
-        name,
-    )
+    m = re.search(r"(?i)\bDeepSeek-R1-Distill-([A-Za-z0-9.]+)-([0-9]+)B", name)
     if m:
         base = re.sub(r"[^a-z0-9]", "", m.group(1).lower())
         return "dsr1distill{}b{}{}".format(base, m.group(2), suffix)
 
-    # Conservative fallback: alnum-only basename + precision suffix.
+    m = re.search(r"(?i)\bMiniMax-M?([0-9]+(?:\.[0-9]+)?)", name)
+    if m:
+        marker = "m" if re.search(r"(?i)\bMiniMax-M", name) else ""
+        return "minimax{}{}{}".format(marker, clean_version(m.group(1)), suffix)
+
+    m = re.search(r"(?i)\bKimi-K?([0-9]+(?:\.[0-9]+)?)", name)
+    if m:
+        return "kimik{}{}".format(clean_version(m.group(1)), suffix)
+
     base = re.sub(r"[^a-z0-9]", "", name.lower())
     return "{}{}".format(base, suffix)
 
@@ -114,7 +139,7 @@ def resolve_service_script(server_script, overwrite=False):
     if not src.is_absolute():
         src = (SKILL_ROOT / server_script).resolve()
     if not src.exists():
-        raise SystemExit("server_script 不存在: {}".format(src))
+        raise SystemExit("server_script does not exist: {}".format(src))
 
     rel = relative_to_skill(str(src))
     if rel and rel.startswith("scripts/server-scripts/"):
@@ -123,13 +148,14 @@ def resolve_service_script(server_script, overwrite=False):
     dest = SERVER_SCRIPTS_DIR / src.name
     if dest.exists() and not overwrite:
         raise SystemExit(
-            "目标服务脚本已存在: {}；如需覆盖请传 --overwrite".format(dest)
+            "target service script already exists: {}; pass --overwrite to replace it".format(dest)
         )
     return "scripts/server-scripts/{}".format(src.name), src, True
 
 
 def shell_quote(value):
-    return "'" + str(value).replace("'", "'\\''") + "'"
+    text = str(value)
+    return "'" + text.replace("'", "'\\''") + "'"
 
 
 def read_text(path):
@@ -165,19 +191,6 @@ def extract_env_vars(script_text):
     return result
 
 
-def validate_server_script(script_text):
-    warnings = []
-    if "MODEL_PATH" not in script_text:
-        warnings.append("未检测到 MODEL_PATH 参数化")
-    if "GPU_RANGE" not in script_text:
-        warnings.append("未检测到 GPU_RANGE 参数化")
-    if "PORT" not in script_text:
-        warnings.append("未检测到 PORT 参数化")
-    if "TP" not in script_text and "TP_SIZE" not in script_text:
-        warnings.append("未检测到 TP 参数化")
-    return warnings
-
-
 def existing_short_mapping(short_name):
     text = read_text(CONVENTIONS_FILE)
     for line in text.splitlines():
@@ -187,52 +200,55 @@ def existing_short_mapping(short_name):
     return None
 
 
+def insert_row_after_table_heading(current_text, heading_pattern, row):
+    lines = current_text.splitlines()
+    if row in lines:
+        return current_text
+    heading_idx = None
+    for idx, line in enumerate(lines):
+        if re.search(heading_pattern, line):
+            heading_idx = idx
+            break
+    if heading_idx is None:
+        return current_text.rstrip() + "\n\n" + row + "\n"
+
+    table_started = False
+    insert_idx = None
+    for idx in range(heading_idx + 1, len(lines)):
+        line = lines[idx]
+        if line.startswith("|"):
+            table_started = True
+            insert_idx = idx + 1
+            continue
+        if table_started:
+            break
+    if insert_idx is None:
+        insert_idx = len(lines)
+    lines.insert(insert_idx, row)
+    return "\n".join(lines) + "\n"
+
+
 def update_conventions(model_name, model_short, precision, port):
     text = read_text(CONVENTIONS_FILE)
-
-    def insert_row_after_table_heading(current_text, heading_pattern, row):
-        lines = current_text.splitlines()
-        if row in lines:
-            return current_text
-        row_parts = [p.strip() for p in row.strip().strip("|").split("|")]
-        heading_idx = None
-        for idx, line in enumerate(lines):
-            if re.search(heading_pattern, line):
-                heading_idx = idx
-                break
-        if heading_idx is None:
-            return current_text.rstrip() + "\n\n" + row + "\n"
-
-        table_started = False
-        insert_idx = None
-        for idx in range(heading_idx + 1, len(lines)):
-            line = lines[idx]
-            if line.startswith("|"):
-                table_started = True
-                line_parts = [p.strip() for p in line.strip().strip("|").split("|")]
-                if (
-                    len(row_parts) >= 2
-                    and len(line_parts) >= 2
-                    and line_parts[0] == row_parts[0]
-                    and line_parts[1] == row_parts[1]
-                ):
-                    return current_text
-                insert_idx = idx + 1
-                continue
-            if table_started:
-                break
-        if insert_idx is None:
-            insert_idx = len(lines)
-        lines.insert(insert_idx, row)
-        return "\n".join(lines) + "\n"
-
     entry = "| {} | {} | {} |".format(model_name, model_short, precision)
-    text = insert_row_after_table_heading(text, r"MODEL_SHORT", entry)
 
-    port_label = "{} 系列".format(model_name.split("-W", 1)[0].split("-Channel", 1)[0])
+    lines = text.splitlines()
+    replaced = False
+    for idx, line in enumerate(lines):
+        if not line.startswith("|"):
+            continue
+        parts = [p.strip() for p in line.strip().strip("|").split("|")]
+        if len(parts) >= 2 and parts[0] == model_name and parts[1] == model_short:
+            lines[idx] = entry
+            replaced = True
+    text = "\n".join(lines) + ("\n" if lines else "")
+    if not replaced:
+        text = insert_row_after_table_heading(text, r"MODEL_SHORT", entry)
+
+    port_label = "{} series".format(model_name.split("-W", 1)[0].split("-Channel", 1)[0])
     port_row = "| {} | {} |".format(port_label, port)
     if port and port_row not in text:
-        text = insert_row_after_table_heading(text, r"端口|默认端口", port_row)
+        text = insert_row_after_table_heading(text, r"port|端口|默认端口", port_row)
 
     CONVENTIONS_FILE.write_text(text, encoding="utf-8")
 
@@ -244,10 +260,10 @@ def yaml_quote(value):
 def write_profile(args, service_script, vllm_params, env_vars):
     profile = PROFILES_DIR / "{}.yaml".format(args.model_short)
     if profile.exists() and not args.overwrite:
-        raise SystemExit("Profile 已存在: {}；如需覆盖请传 --overwrite".format(profile))
+        raise SystemExit("Profile already exists: {}; pass --overwrite to replace it".format(profile))
     lines = [
-        "# 模型 Profile: {}".format(args.model_name),
-        "# 自动生成于: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        "# Model Profile: {}".format(args.model_name),
+        "# Generated at: {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         "",
         "model:",
         "  display_name: {}".format(yaml_quote(args.model_name)),
@@ -276,7 +292,7 @@ def write_profile(args, service_script, vllm_params, env_vars):
                 lines.append("    {}: {}".format(key, yaml_quote(value)))
     else:
         lines.append("    {}")
-    lines.extend(["  env_vars:"])
+    lines.append("  env_vars:")
     if env_vars:
         lines.extend(["    - {}".format(name) for name in env_vars])
     else:
@@ -286,7 +302,7 @@ def write_profile(args, service_script, vllm_params, env_vars):
             "",
             "health_check:",
             '  endpoint: "/v1/chat/completions"',
-            '  prompt: "\u4f60\u597d"',
+            '  prompt: "你好"',
             "  timeout_seconds: {}".format(args.timeout),
             "",
         ]
@@ -298,7 +314,7 @@ def write_profile(args, service_script, vllm_params, env_vars):
 def write_example(args, service_script):
     example = EXAMPLES_DIR / "{}-test-task.yaml".format(args.model_short)
     if example.exists() and not args.overwrite:
-        raise SystemExit("Example 已存在: {}；如需覆盖请传 --overwrite".format(example))
+        raise SystemExit("Example already exists: {}; pass --overwrite to replace it".format(example))
     content = """task:
   name: vllm_perf_{short}
   run_id: auto
@@ -370,6 +386,11 @@ output:
     return example
 
 
+def print_command(name, command):
+    print("{}=".format(name))
+    print(" \\\n  ".join(shell_quote(x) if any(c in str(x) for c in " <>") else str(x) for x in command))
+
+
 def print_run_single_task(args, service_script):
     command = [
         "bash",
@@ -389,9 +410,9 @@ def print_run_single_task(args, service_script):
         "--server-script",
         service_script,
         "--port",
-        str(args.port),
+        args.port,
         "--tp",
-        str(args.tp),
+        args.tp,
         "--gpu-range",
         args.gpu_range,
         "--test-mode",
@@ -407,13 +428,35 @@ def print_run_single_task(args, service_script):
         "--percentiles",
         "50,95,99",
         "--timeout",
-        str(args.timeout),
+        args.timeout,
         "--image-prefix",
         "<IMAGE_PREFIX>",
         "--dry-run",
     ]
-    print("RUN_SINGLE_TASK_DRY_RUN_CMD=")
-    print(" \\\n  ".join(shell_quote(x) if any(c in x for c in " <>") else x for x in command))
+    print_command("RUN_SINGLE_TASK_DRY_RUN_CMD", command)
+
+
+def print_standardize_command(args, service_script):
+    command = [
+        "bash",
+        STANDARDIZE_SERVER_SCRIPT,
+        "--model-name",
+        args.model_name,
+        "--server-script",
+        service_script,
+        "--container-model-path",
+        args.container_model_path,
+        "--port",
+        args.port,
+        "--tp",
+        args.tp,
+        "--gpu-range",
+        args.gpu_range,
+        "--dry-run",
+    ]
+    if args.model_short:
+        command.extend(["--model-short", args.model_short])
+    print_command("NEXT_STEP_STANDARDIZE_CMD", command)
 
 
 def is_glm_model(model_name):
@@ -473,20 +516,22 @@ def parse_args():
     return parser.parse_args()
 
 
-def enrich_args(args, script_text=""):
+def enrich_args(args, script_text, service_script):
     args.model_name = normalize_name(args.model_name)
     args.host_model_path = args.host_model_path.rstrip("/")
-    args.precision = args.precision or detect_precision(args.model_name)
+    args.precision, args.precision_defaulted = infer_precision(
+        args.model_name, service_script, args.precision
+    )
     args.model_short = args.model_short or derive_model_short(args.model_name, args.precision)
     if not re.match(r"^[a-z0-9]+$", args.model_short):
-        raise SystemExit("MODEL_SHORT 只能包含小写字母和数字: {}".format(args.model_short))
+        raise SystemExit("MODEL_SHORT may only contain lowercase letters and digits: {}".format(args.model_short))
     if not args.container_model_path:
         args.container_model_path = host_to_container_path(args.host_model_path)
     if not args.container_model_path:
-        raise SystemExit("无法从 host_model_path 推导容器路径，请显式传 --container-model-path")
+        raise SystemExit("cannot infer container path from host_model_path; pass --container-model-path")
     args.port = args.port or default_port(args.model_name)
     if args.port is None:
-        raise SystemExit("非 GLM 模型不会自动分配端口，请显式传 --port")
+        raise SystemExit("non-GLM models do not get an automatic port; pass --port")
     if args.tp is None:
         if is_glm_model(args.model_name):
             args.tp = 8
@@ -513,11 +558,12 @@ def main():
         args.server_script, overwrite=args.overwrite
     )
     script_text = read_text(src)
-    args = enrich_args(args, script_text)
+    args = enrich_args(args, script_text, service_script)
+
     existing = existing_short_mapping(args.model_short)
     if existing and existing != args.model_name:
         raise SystemExit(
-            "MODEL_SHORT 冲突: {} 已映射到 {}，请显式传入其他 --model-short".format(
+            "MODEL_SHORT conflict: {} already maps to {}; pass another --model-short".format(
                 args.model_short, existing
             )
         )
@@ -526,12 +572,16 @@ def main():
     env_vars = extract_env_vars(script_text)
     warnings = validate_server_script(script_text)
     if warnings and not args.dry_run and not args.allow_static_server_script:
+        for warning in warnings:
+            print("WARN={}".format(warning))
+        print_standardize_command(args, service_script)
         raise SystemExit(
-            "server script is not parameterized; fix it or pass --allow-static-server-script"
+            "server script is not standardized; run standardize_server_script.sh first or pass --allow-static-server-script"
         )
 
     print("MODEL_NAME={}".format(args.model_name))
     print("MODEL_SHORT={}".format(args.model_short))
+    print("MODEL_PRECISION={}".format(args.precision))
     print("PRECISION={}".format(args.precision))
     print("HOST_MODEL_PATH={}".format(args.host_model_path))
     print("CONTAINER_MODEL_PATH={}".format(args.container_model_path))
@@ -539,11 +589,17 @@ def main():
     print("TP={}".format(args.tp))
     print("GPU_RANGE={}".format(args.gpu_range))
     print("SERVICE_SCRIPT={}".format(service_script))
+    print("COMPUTE_DTYPE={}".format(vllm_params.get("dtype", "")))
+    print("KV_CACHE_DTYPE={}".format(vllm_params.get("kv_cache_dtype", "")))
+    if getattr(args, "precision_defaulted", False):
+        print("WARN=precision defaulted to bf16; pass --precision to confirm")
     for warning in warnings:
         print("WARN={}".format(warning))
+    if warnings:
+        print_standardize_command(args, service_script)
 
     if args.dry_run:
-        print("DRY_RUN=1，不写入任何文件。")
+        print("DRY_RUN=1, no files written.")
         print_run_single_task(args, service_script)
         return 0
 

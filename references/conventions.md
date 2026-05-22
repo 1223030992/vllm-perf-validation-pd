@@ -17,6 +17,8 @@
 | GLM-5.1-Channel-FP8 | glm51fp8 | GLM-5.1 Channel FP8 |
 | GLM-4.7（未标精度，默认 bf16） | glm47 | GLM-4.7 bf16 |
 | GLM-5.1（未标精度，默认 bf16） | glm51 | GLM-5.1 bf16 |
+| MiniMax-M2.5-W8A8 | minimaxm25int8 | int8 |
+| Kimi-K2.5-INT4 | kimik25int4 | int4 |
 
 ---
 
@@ -70,6 +72,8 @@ GLM-4.7-W8A8-serial-full-20260515-lzh-agent-test-0428-glm47int8-2540/
 | GLM-4.7 系列 | 9348 |
 | GLM-5.1 系列 | 9350 |
 | GLM-5 系列 | 9349 |
+| MiniMax-M2.5 系列 | 9352 |
+| Kimi-K2.5-INT4 系列 | 9354 |
 
 ---
 

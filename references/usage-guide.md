@@ -201,6 +201,7 @@ render_report.py
       "Read(/public/home/liuzhh8/skilltest/vllm-perf-validation-single/**)",
       "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh *)",
       "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh *)",
+      "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/standardize_server_script.sh *)",
       "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/show_state.sh *)",
       "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/recover_single_task.sh *)",
       "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/resume_single_task.sh *)"
@@ -715,3 +716,42 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 - `register_model.sh` 生成的 profile/example 是否需要人工修改过多。
 
 这些反馈会直接用于后续版本优化。
+## 新模型标准化注册流程
+
+新增模型统一走四步，不要手写 profile/example，也不要直接用未标准化 server script 做正式注册：
+
+1. `standardize_server_script.sh --dry-run`
+2. `standardize_server_script.sh`
+3. `register_model.sh --dry-run` / `register_model.sh`
+4. `run_single_task.sh --dry-run` / `run_single_task.sh`
+
+标准化入口不连接 SSH、Docker 或 GPU，只处理本地 server script：
+
+```bash
+bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/standardize_server_script.sh \
+  --model-name MiniMax-M2.5-W8A8 \
+  --model-short minimaxm25int8 \
+  --server-script scripts/server-scripts/run_minimax2.5-w8a8.sh \
+  --container-model-path /model2/llm-models/MiniMax-M2.5-W8A8 \
+  --port 9352 \
+  --tp 8 \
+  --gpu-range 0,1,2,3,4,5,6,7 \
+  --dry-run
+```
+
+正式执行标准化后，再注册：
+
+```bash
+bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
+  --model-name MiniMax-M2.5-W8A8 \
+  --model-short minimaxm25int8 \
+  --host-model-path /public4/opendas/DL_DATA/llm-models/MiniMax-M2.5-W8A8 \
+  --container-model-path /model2/llm-models/MiniMax-M2.5-W8A8 \
+  --server-script scripts/server-scripts/run_minimax2.5-w8a8.sh \
+  --port 9352 \
+  --tp 8 \
+  --gpu-range 0,1,2,3,4,5,6,7 \
+  --dry-run
+```
+
+如果注册器发现脚本未标准化，会输出 `NEXT_STEP_STANDARDIZE_CMD`。正式注册默认拒绝未标准化脚本，除非显式传 `--allow-static-server-script`。
