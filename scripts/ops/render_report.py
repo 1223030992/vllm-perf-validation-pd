@@ -200,6 +200,7 @@ def main():
             "log_file": log_file,
             "summary": summary,
         },
+        "pchit": state.get("pchit", {}),
         "paths": {
             "state_file": str(state_file),
             "report_json": str(report_dir / "{}.json".format(args.run_id)),
@@ -252,6 +253,22 @@ def main():
         "- Ops version: {}".format(deep_get(state, "ops.version")),
         "",
     ]
+    if deep_get(state, "test.mode") == "pchit" or state.get("pchit"):
+        warmup = state.get("pchit", {}).get("warmup", {})
+        md_lines.extend(
+            [
+                "## Prefix Cache 预热",
+                "",
+                "- 目标命中率: {}".format(warmup.get("target_pct")),
+                "- 容差: {}".format(warmup.get("tolerance_pct")),
+                "- 达标观测值: {}".format(warmup.get("observed_pct")),
+                "- 预热配置命中率: {}".format(warmup.get("warmup_rate")),
+                "- 预热轮数: {}".format(warmup.get("rounds")),
+                "- 预热耗时秒: {}".format(warmup.get("duration_seconds")),
+                "- 最近日志: `{}`".format(warmup.get("log_excerpt", "")),
+                "",
+            ]
+        )
     if report["failure"]:
         md_lines.extend(
             [

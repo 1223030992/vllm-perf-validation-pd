@@ -13,7 +13,9 @@ usage() {
 透传给 client 脚本的环境变量:
   WORK_DIR TEST_MODE IMAGE_NAME INPUT_LENS OUTPUT_LEN CONCURRENCIES
   NUM_PROMPTS_MULT REQUEST_RATE PERCENTILES CACHE_HIT_RATES BATCHES PAIRS
-  INPUT_LEN OUTPUT_LENS CONCURRENCY_MULTIPLIER
+  INPUT_LEN OUTPUT_LENS CONCURRENCY_MULTIPLIER PCHIT_TARGET_PCT
+  PCHIT_OBSERVED_PC_HIT_PCT PCHIT_WARMUP_RATE PCHIT_WARMUP_ROUNDS
+  PCHIT_WARMUP_DURATION_SECONDS
 
 说明:
   本脚本强制在容器内使用 bash -ic 执行 benchmark，避免 DTK/HIP 环境未加载导致缺库。
@@ -136,15 +138,24 @@ STATE_HOST="$(to_host_path "$STATE")"
 
 if [[ -f "$STATE_HOST" ]]; then
   INPUT_LENS="${INPUT_LENS:-$(state_get "$STATE_HOST" test.params.input_lens)}"
+  INPUT_LEN="${INPUT_LEN:-$(state_get "$STATE_HOST" test.params.input_len)}"
   OUTPUT_LEN="${OUTPUT_LEN:-$(state_get "$STATE_HOST" test.params.output_len)}"
   CONCURRENCIES="${CONCURRENCIES:-$(state_get "$STATE_HOST" test.params.concurrencies)}"
   NUM_PROMPTS_MULT="${NUM_PROMPTS_MULT:-$(state_get "$STATE_HOST" test.params.num_prompts_mult)}"
   PERCENTILES="${PERCENTILES:-$(state_get "$STATE_HOST" test.params.percentiles)}"
   REQUEST_RATE="${REQUEST_RATE:-$(state_get "$STATE_HOST" test.params.request_rate)}"
+  CACHE_HIT_RATES="${CACHE_HIT_RATES:-$(state_get "$STATE_HOST" test.params.cache_hit_rates)}"
+  BATCHES="${BATCHES:-$(state_get "$STATE_HOST" test.params.batches)}"
+  CONCURRENCY_MULTIPLIER="${CONCURRENCY_MULTIPLIER:-$(state_get "$STATE_HOST" test.params.concurrency_multiplier)}"
+  PCHIT_TARGET_PCT="${PCHIT_TARGET_PCT:-$(state_get "$STATE_HOST" pchit.warmup.target_pct)}"
+  PCHIT_OBSERVED_PC_HIT_PCT="${PCHIT_OBSERVED_PC_HIT_PCT:-$(state_get "$STATE_HOST" pchit.warmup.observed_pct)}"
+  PCHIT_WARMUP_RATE="${PCHIT_WARMUP_RATE:-$(state_get "$STATE_HOST" pchit.warmup.warmup_rate)}"
+  PCHIT_WARMUP_ROUNDS="${PCHIT_WARMUP_ROUNDS:-$(state_get "$STATE_HOST" pchit.warmup.rounds)}"
+  PCHIT_WARMUP_DURATION_SECONDS="${PCHIT_WARMUP_DURATION_SECONDS:-$(state_get "$STATE_HOST" pchit.warmup.duration_seconds)}"
 fi
 
 env_exports=""
-for name in IMAGE_NAME INPUT_LENS OUTPUT_LEN CONCURRENCIES NUM_PROMPTS_MULT REQUEST_RATE PERCENTILES CACHE_HIT_RATES BATCHES PAIRS INPUT_LEN OUTPUT_LENS CONCURRENCY_MULTIPLIER; do
+for name in IMAGE_NAME INPUT_LENS OUTPUT_LEN CONCURRENCIES NUM_PROMPTS_MULT REQUEST_RATE PERCENTILES CACHE_HIT_RATES BATCHES PAIRS INPUT_LEN OUTPUT_LENS CONCURRENCY_MULTIPLIER PCHIT_TARGET_PCT PCHIT_OBSERVED_PC_HIT_PCT PCHIT_WARMUP_RATE PCHIT_WARMUP_ROUNDS PCHIT_WARMUP_DURATION_SECONDS; do
   if [[ -n "${!name-}" ]]; then
     env_exports+="export ${name}=$(quote_sh "${!name}")"$'\n'
   fi
@@ -187,11 +198,15 @@ python3 $(quote_sh "$SKILL_CONTAINER_ROOT/scripts/ops/update_state.py") --state 
   --set "status=BENCH_ENV_CHECKING" \
   --set "test.mode=$(printf '%s' "$TEST_MODE")" \
   --set "test.params.input_lens=\${INPUT_LENS:-}" \
+  --set "test.params.input_len=\${INPUT_LEN:-}" \
   --set "test.params.output_len=\${OUTPUT_LEN:-}" \
   --set "test.params.concurrencies=\${CONCURRENCIES:-}" \
   --set "test.params.num_prompts_mult=\${NUM_PROMPTS_MULT:-}" \
   --set "test.params.percentiles=\${PERCENTILES:-}" \
   --set "test.params.request_rate=\${REQUEST_RATE:-}" \
+  --set "test.params.cache_hit_rates=\${CACHE_HIT_RATES:-}" \
+  --set "test.params.batches=\${BATCHES:-}" \
+  --set "test.params.concurrency_multiplier=\${CONCURRENCY_MULTIPLIER:-}" \
   --set "model.served_model_id=$(printf '%s' "$SERVED_MODEL_ID")" \
   --set "model.bench_model_id=\$BENCH_MODEL_ID" \
   --set "paths.work_dir_host=\$WORK_DIR_HOST" \

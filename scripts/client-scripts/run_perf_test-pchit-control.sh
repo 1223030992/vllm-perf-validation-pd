@@ -33,6 +33,7 @@ if [[ $# -gt 0 ]]; then
 else
     CACHE_HIT_RATES=${CACHE_HIT_RATES:-99}
 fi
+CACHE_HIT_RATES=$(echo "$CACHE_HIT_RATES" | tr ',' ' ')
 BENCH_MODEL_ID=${BENCH_MODEL_ID:-${SERVED_MODEL_ID:-$MODEL_PATH}}
 ENDPOINT=${ENDPOINT:-/v1/completions}
 
@@ -40,12 +41,19 @@ ENDPOINT=${ENDPOINT:-/v1/completions}
 INPUT_LEN=${INPUT_LEN:-65536}
 OUTPUT_LEN=${OUTPUT_LEN:-256}
 BATCHES=${BATCHES:-"1 2 4"}
+BATCHES=$(echo "$BATCHES" | tr ',' ' ')
 CONCURRENCY_MULTIPLIER=${CONCURRENCY_MULTIPLIER:-4}
 HIGH_BATCH_THRESHOLD=${HIGH_BATCH_THRESHOLD:-128}
 HIGH_BATCH_MULTIPLIER=${HIGH_BATCH_MULTIPLIER:-4}
 IMAGE_NAME=${IMAGE_NAME:-unknown}
 GPU_RANGE=${GPU_RANGE:-"0,1,2,3,4,5,6,7"}
 TEST_MODE=${TEST_MODE:-pchit}
+PCHIT_WARMUP_ONLY=${PCHIT_WARMUP_ONLY:-0}
+PCHIT_TARGET_PCT=${PCHIT_TARGET_PCT:-}
+PCHIT_OBSERVED_PC_HIT_PCT=${PCHIT_OBSERVED_PC_HIT_PCT:-}
+PCHIT_WARMUP_RATE=${PCHIT_WARMUP_RATE:-}
+PCHIT_WARMUP_ROUNDS=${PCHIT_WARMUP_ROUNDS:-}
+PCHIT_WARMUP_DURATION_SECONDS=${PCHIT_WARMUP_DURATION_SECONDS:-}
 
 model=${MODEL_NAME:-${BENCH_MODEL_ID##*/}}
 date=$(date "+%Y%m%d")
@@ -107,7 +115,7 @@ all_log="${CSV_DIR}/all.csv"
     echo "  --trust-remote-code"
 } > "${RUN_DIR}/commands_backup.txt"
 
-echo "cache_hit_pct,prefix_len,input,output,num_prompts,concurrency,duration_s,rps,generate_throughput_tok_s,total_throughput_tok_s,mean_ttft_ms,p95_ttft_ms,p99_ttft_ms,mean_tpot_ms,p95_tpot_ms,p99_tpot_ms,mean_itl_ms,p95_itl_ms,p99_itl_ms,QPM,prefill_throughput_tok_s_per_gpu,decode_throughput_tok_s_per_gpu,status,error_reason" > "$all_log"
+echo "cache_hit_pct,prefix_len,input,output,num_prompts,concurrency,duration_s,rps,generate_throughput_tok_s,total_throughput_tok_s,mean_ttft_ms,p95_ttft_ms,p99_ttft_ms,mean_tpot_ms,p95_tpot_ms,p99_tpot_ms,mean_itl_ms,p95_itl_ms,p99_itl_ms,QPM,prefill_throughput_tok_s_per_gpu,decode_throughput_tok_s_per_gpu,observed_pc_hit_pct,pc_hit_target_pct,warmup_rate,warmup_rounds,warmup_duration_s,status,error_reason" > "$all_log"
 
 echo "============================================================"
 echo " Prefix Cache 命中率性能测试"
@@ -203,7 +211,7 @@ for cache_hit_pct in $CACHE_HIT_RATES; do
             error_reason="invalid_metrics"
         fi
 
-        echo "${cache_hit_pct},${prefix_len},${INPUT_LEN},${OUTPUT_LEN},${num_prompts},${batch},${Benchmark_duration},${qps},${Output_token_throughput},${Total_Token_throughput},${Mean_TTFT},${P95_TTFT},${P99_TTFT},${Mean_TPOT},${P95_TPOT},${P99_TPOT},${Mean_ITL},${P95_ITL},${P99_ITL},${QPM},${prefill_throughput},${decode_throughput},${status},${error_reason}" >> "$all_log"
+        echo "${cache_hit_pct},${prefix_len},${INPUT_LEN},${OUTPUT_LEN},${num_prompts},${batch},${Benchmark_duration},${qps},${Output_token_throughput},${Total_Token_throughput},${Mean_TTFT},${P95_TTFT},${P99_TTFT},${Mean_TPOT},${P95_TPOT},${P99_TPOT},${Mean_ITL},${P95_ITL},${P99_ITL},${QPM},${prefill_throughput},${decode_throughput},${PCHIT_OBSERVED_PC_HIT_PCT},${PCHIT_TARGET_PCT},${PCHIT_WARMUP_RATE},${PCHIT_WARMUP_ROUNDS},${PCHIT_WARMUP_DURATION_SECONDS},${status},${error_reason}" >> "$all_log"
 
         echo "  ✓ cache_hit=${cache_hit_pct}% batch=${batch} 完成"
     done

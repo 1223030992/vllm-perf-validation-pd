@@ -96,6 +96,12 @@ def main():
         ("stop_status", "status"),
         ("port_released", "service.port_released"),
         ("failure_reason", "failure.reason"),
+        ("pchit_warmup_status", "pchit.warmup.status"),
+        ("pchit_target_pct", "pchit.warmup.target_pct"),
+        ("pchit_observed_pct", "pchit.warmup.observed_pct"),
+        ("pchit_warmup_rate", "pchit.warmup.warmup_rate"),
+        ("pchit_warmup_rounds", "pchit.warmup.rounds"),
+        ("pchit_warmup_duration_seconds", "pchit.warmup.duration_seconds"),
     ]
     for label, path in fields:
         value = deep_get(state, path)
