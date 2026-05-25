@@ -18,14 +18,22 @@ PROFILES_DIR = SKILL_ROOT / "references" / "profiles"
 EXAMPLES_DIR = SKILL_ROOT / "references" / "examples"
 CONVENTIONS_FILE = SKILL_ROOT / "references" / "conventions.md"
 SERVER_SCRIPTS_DIR = SKILL_ROOT / "scripts" / "server-scripts"
-RUN_SINGLE_TASK = (
-    "/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/"
-    "scripts/ops/run_single_task.sh"
-)
-STANDARDIZE_SERVER_SCRIPT = (
-    "/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/"
-    "scripts/ops/standardize_server_script.sh"
-)
+DEFAULT_SKILL_HOST_ROOT = os.environ.get(
+    "SKILL_HOST_ROOT", "/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single"
+).rstrip("/")
+DEFAULT_OUTPUT_HOST_ROOT = os.environ.get(
+    "OUTPUT_HOST_ROOT", "/public/home/liuzhh8/skilltest/vllm-perf-validation-single"
+).rstrip("/")
+DEFAULT_SKILL_CONTAINER_ROOT = os.environ.get(
+    "SKILL_CONTAINER_ROOT", "/mnt/.claude/skills/vllm-perf-validation-single"
+).rstrip("/")
+DEFAULT_OUTPUT_CONTAINER_ROOT = os.environ.get(
+    "OUTPUT_CONTAINER_ROOT", "/mnt/skilltest/vllm-perf-validation-single"
+).rstrip("/")
+DEFAULT_CONTAINER_PREFIX = os.environ.get("CONTAINER_PREFIX", "lzh-agent-test")
+DEFAULT_OWNER = os.environ.get("SKILL_OWNER", "liuzhihuan")
+RUN_SINGLE_TASK = DEFAULT_SKILL_HOST_ROOT + "/scripts/ops/run_single_task.sh"
+STANDARDIZE_SERVER_SCRIPT = DEFAULT_SKILL_HOST_ROOT + "/scripts/ops/standardize_server_script.sh"
 
 
 def normalize_name(name):
@@ -318,16 +326,16 @@ def write_example(args, service_script):
     content = """task:
   name: vllm_perf_{short}
   run_id: auto
-  owner: liuzhihuan
+  owner: {owner}
   description: "{model_name} custom smoke"
 
 mode: single
 
 paths:
-  skill_host_root: /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single
-  skill_container_root: /mnt/.claude/skills/vllm-perf-validation-single
-  output_host_root: /public/home/liuzhh8/skilltest/vllm-perf-validation-single
-  output_container_root: /mnt/skilltest/vllm-perf-validation-single
+  skill_host_root: {skill_host_root}
+  skill_container_root: {skill_container_root}
+  output_host_root: {output_host_root}
+  output_container_root: {output_container_root}
 
 image:
   name: null
@@ -339,7 +347,7 @@ node:
   gpu_count: 8
 
 container:
-  name_template: "lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>"
+  name_template: "{container_prefix}-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>"
 
 models:
   - name: "{model_name}"
@@ -368,12 +376,18 @@ test:
     percentiles: "50,95,99"
 
 output:
-  work_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs
-  report_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/reports
-  csv_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/csvs
+  work_dir: {output_host_root}/work_dirs
+  report_dir: {output_host_root}/reports
+  csv_dir: {output_host_root}/csvs
 """.format(
         short=args.model_short,
         model_name=args.model_name,
+        skill_host_root=DEFAULT_SKILL_HOST_ROOT,
+        skill_container_root=DEFAULT_SKILL_CONTAINER_ROOT,
+        output_host_root=DEFAULT_OUTPUT_HOST_ROOT,
+        output_container_root=DEFAULT_OUTPUT_CONTAINER_ROOT,
+        container_prefix=DEFAULT_CONTAINER_PREFIX,
+        owner=DEFAULT_OWNER,
         host_model_path=args.host_model_path,
         container_model_path=args.container_model_path,
         service_script=service_script,

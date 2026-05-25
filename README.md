@@ -2,6 +2,63 @@
 
 GitHub: https://github.com/1223030992/vllm-perf-validation-single
 
+## 新用户一键迁移
+
+新用户拿到这个 skill 后，建议先执行一次受控迁移，把仓库内默认的用户路径和容器名前缀从示例用户切换为自己的配置。该脚本只修改 skill 本地文本文件，不移动目录，不修改模型数据路径，不执行 SSH/Docker/GPU 操作。
+
+最小 dry-run 指令：
+
+```bash
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/configure_skill_user.sh \
+  --user zhangsan \
+  --abbr zs \
+  --dry-run
+```
+
+确认替换计划无误后正式应用：
+
+```bash
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/configure_skill_user.sh \
+  --user zhangsan \
+  --abbr zs \
+  --apply \
+  --backup
+```
+
+默认迁移规则：
+
+| 配置项 | 迁移后默认值 |
+| --- | --- |
+| skill 宿主机路径 | `/public/home/<user>/.claude/skills/vllm-perf-validation-single` |
+| 运行产物路径 | `/public/home/<user>/skilltest/vllm-perf-validation-single` |
+| 容器内 skill 路径 | `/mnt/.claude/skills/vllm-perf-validation-single` |
+| 容器内产物路径 | `/mnt/skilltest/vllm-perf-validation-single` |
+| 容器名前缀 | `<abbr>-agent-test` |
+
+示例：`--user zhangsan --abbr zs` 后，容器名会从 `lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>` 变为 `zs-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>`。
+
+迁移脚本会输出 `settings.local.json` 的 allow 片段。至少需要放行：
+
+- `configure_skill_user.sh`
+- `standardize_server_script.sh`
+- `register_model.sh`
+- `run_single_task.sh`
+- `resume_single_task.sh`
+- `show_state.sh`
+
+如果使用自定义安装目录，可以显式传入：
+
+```bash
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/configure_skill_user.sh \
+  --user zhangsan \
+  --abbr zs \
+  --skill-host-root /public/home/zhangsan/.claude/skills/vllm-perf-validation-single \
+  --output-host-root /public/home/zhangsan/skilltest/vllm-perf-validation-single \
+  --container-prefix zs-agent-test \
+  --apply \
+  --backup
+```
+
 这是一个面向 Claude Code / Codex 的 vLLM 单节点性能验证 skill。它把模型性能测试拆成低自由度 ops 脚本：创建容器、启动服务、等待 `/v1/models`、发现 `served_model_id`、运行 benchmark、停止服务、生成 CSV/JSON/Markdown 报告。
 
 当前重点是单模型 single 流程和新模型接入流程。GLM-4.7 single custom 已稳定；Kimi-K2.5-INT4 已完成 single custom 冒烟；pchit、serial、parallel 仍需要继续实测验证。

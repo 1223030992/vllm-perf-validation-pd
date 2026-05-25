@@ -24,6 +24,7 @@ Common options:
   --date MMDD
   --image-prefix PREFIX
   --container NAME
+  --container-prefix PREFIX
   --run-id ID
   --timeout SECONDS
   --interval SECONDS
@@ -217,6 +218,7 @@ PC_HIT_INTERVAL=30
 DATE_PART="$(date +%m%d)"
 IMAGE_PREFIX=""
 CONTAINER=""
+CONTAINER_PREFIX="${CONTAINER_PREFIX:-lzh-agent-test}"
 RUN_ID=""
 TIMEOUT=1800
 TIMEOUT_SET=0
@@ -235,6 +237,7 @@ fi
 SKILL_CONTAINER_ROOT="${SKILL_CONTAINER_ROOT:-/mnt/.claude/skills/vllm-perf-validation-single}"
 OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-/mnt/skilltest/vllm-perf-validation-single}"
 OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-/public/home/liuzhh8/skilltest/vllm-perf-validation-single}"
+HOST_HOME_ROOT="${HOST_HOME_ROOT:-/public/home/liuzhh8}"
 REPORT_DIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -271,6 +274,7 @@ while [[ $# -gt 0 ]]; do
     --date) DATE_PART="$2"; shift 2 ;;
     --image-prefix) IMAGE_PREFIX="$2"; shift 2 ;;
     --container) CONTAINER="$2"; shift 2 ;;
+    --container-prefix) CONTAINER_PREFIX="$2"; shift 2 ;;
     --run-id) RUN_ID="$2"; shift 2 ;;
     --timeout) TIMEOUT="$2"; TIMEOUT_SET=1; shift 2 ;;
     --interval) INTERVAL="$2"; shift 2 ;;
@@ -336,7 +340,7 @@ if [[ -z "$IMAGE_PREFIX" ]]; then
   fi
 fi
 if [[ -z "$CONTAINER" ]]; then
-  CONTAINER="lzh-agent-test-${DATE_PART}-${MODEL_SHORT}-${IMAGE_PREFIX}"
+  CONTAINER="${CONTAINER_PREFIX}-${DATE_PART}-${MODEL_SHORT}-${IMAGE_PREFIX}"
 fi
 if [[ -z "$RUN_ID" ]]; then
   RUN_ID="${MODEL_SHORT}-${TEST_MODE}-$(date +%Y%m%d)-${CONTAINER}"
@@ -382,6 +386,7 @@ Key parameters:
   NODE=$NODE
   IMAGE=$IMAGE
   CONTAINER=$CONTAINER
+  CONTAINER_PREFIX=$CONTAINER_PREFIX
   MODEL_NAME=$MODEL_NAME
   MODEL_SHORT=$MODEL_SHORT
   HOST_MODEL_PATH=$HOST_MODEL_PATH
@@ -408,6 +413,8 @@ Key parameters:
   PC_HIT_TIMEOUT=$PC_HIT_TIMEOUT
   PC_HIT_INTERVAL=$PC_HIT_INTERVAL
   TIMEOUT=$TIMEOUT
+  HOST_HOME_ROOT=$HOST_HOME_ROOT
+  OUTPUT_HOST_ROOT=$OUTPUT_HOST_ROOT
   REPORT_DIR=$REPORT_DIR
 EOF
   exit 0
@@ -430,6 +437,8 @@ run_step_capture "create_container" "$TMP_DIR/create.out" \
     --model-short "$MODEL_SHORT" \
     --date "$DATE_PART" \
     --image-prefix "$IMAGE_PREFIX" \
+    --container-prefix "$CONTAINER_PREFIX" \
+    --host-home-root "$HOST_HOME_ROOT" \
     --name "$CONTAINER"
 
 run_step_capture "start_vllm_service" "$TMP_DIR/start.out" \

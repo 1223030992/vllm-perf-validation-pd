@@ -16,14 +16,11 @@ from pathlib import Path
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[2]
-STANDARDIZE_SCRIPT = (
-    "/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/"
-    "scripts/ops/standardize_server_script.sh"
-)
-REGISTER_MODEL = (
-    "/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/"
-    "scripts/ops/register_model.sh"
-)
+DEFAULT_SKILL_HOST_ROOT = os.environ.get(
+    "SKILL_HOST_ROOT", "/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single"
+).rstrip("/")
+STANDARDIZE_SCRIPT = DEFAULT_SKILL_HOST_ROOT + "/scripts/ops/standardize_server_script.sh"
+REGISTER_MODEL = DEFAULT_SKILL_HOST_ROOT + "/scripts/ops/register_model.sh"
 
 
 GENERIC_EXPORTS = set(

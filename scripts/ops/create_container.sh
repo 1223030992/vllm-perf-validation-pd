@@ -3,22 +3,20 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-用法:
-  create_container.sh --node NODE --image IMAGE --model-short MODEL_SHORT
+Usage:
+  create_container.sh --node NODE --image IMAGE --model-short MODEL_SHORT [options]
 
-选项:
-  --date MMDD              覆盖容器名中的日期。
-  --image-prefix PREFIX    覆盖容器名中的镜像短标识。
-  --name NAME              使用已经生成且符合规范的容器名。
-  --dry-run                只打印命令，不创建容器。
+Options:
+  --date MMDD
+  --image-prefix PREFIX
+  --container-prefix PREFIX   Default: $CONTAINER_PREFIX or lzh-agent-test
+  --host-home-root PATH       Default: $HOST_HOME_ROOT or /public/home/liuzhh8
+  --name NAME                 Use an already generated container name
+  --dry-run
   --allow-image-prefix-fallback
-                           镜像 inspect 失败时允许退回 tag 前 4 位。
 
-环境变量兼容:
-  旧版 dry-run 和 image-prefix fallback 环境变量仍兼容；正式调用请使用参数形式。
-
-自动生成的容器名格式:
-  lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>
+Container name format:
+  <CONTAINER_PREFIX>-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>
 USAGE
 }
 
@@ -28,6 +26,8 @@ MODEL_SHORT=""
 DATE_PART="$(date +%m%d)"
 IMAGE_PREFIX=""
 CONTAINER_NAME=""
+CONTAINER_PREFIX="${CONTAINER_PREFIX:-lzh-agent-test}"
+HOST_HOME_ROOT="${HOST_HOME_ROOT:-/public/home/liuzhh8}"
 DRY_RUN="${DRY_RUN:-0}"
 IMAGE_PREFIX_FALLBACK="${IMAGE_PREFIX_FALLBACK:-0}"
 
@@ -50,12 +50,21 @@ inspect_image_prefix() {
     return 0
   fi
   if [[ "${IMAGE_PREFIX_FALLBACK:-0}" == "1" ]]; then
-    echo "警告: 无法通过 docker image inspect 解析 Image ID，退回使用镜像 tag 前 4 位。" >&2
+    echo "WARN: docker image inspect failed; fallback to image tag prefix." >&2
     tag_prefix_from_image "$IMAGE"
     return 0
   fi
-  echo "无法通过 docker image inspect 解析镜像 ID，请确认镜像存在或显式传入 --image-prefix。" >&2
+  echo "Cannot resolve image id; confirm image exists or pass --image-prefix." >&2
   return 1
+}
+
+validate_prefix() {
+  local prefix="$1"
+  if ! [[ "$prefix" =~ ^[a-z0-9][a-z0-9-]*[a-z0-9]$ ]]; then
+    echo "Invalid container prefix: $prefix" >&2
+    echo "Use lowercase letters, digits, and hyphens; start and end with alnum." >&2
+    return 2
+  fi
 }
 
 while [[ $# -gt 0 ]]; do
@@ -65,21 +74,30 @@ while [[ $# -gt 0 ]]; do
     --model-short) MODEL_SHORT="$2"; shift 2 ;;
     --date) DATE_PART="$2"; shift 2 ;;
     --image-prefix) IMAGE_PREFIX="$2"; shift 2 ;;
+    --container-prefix) CONTAINER_PREFIX="$2"; shift 2 ;;
+    --host-home-root) HOST_HOME_ROOT="$2"; shift 2 ;;
     --name) CONTAINER_NAME="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --allow-image-prefix-fallback) IMAGE_PREFIX_FALLBACK=1; shift ;;
     --help) usage; exit 0 ;;
-    *) echo "未知参数: $1" >&2; usage; exit 2 ;;
+    *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
 
-[[ -n "$NODE" ]] || { echo "缺少参数: --node" >&2; exit 2; }
-[[ -n "$IMAGE" ]] || { echo "缺少参数: --image" >&2; exit 2; }
-[[ -n "$MODEL_SHORT" ]] || { echo "缺少参数: --model-short" >&2; exit 2; }
+[[ -n "$NODE" ]] || { echo "missing argument: --node" >&2; exit 2; }
+[[ -n "$IMAGE" ]] || { echo "missing argument: --image" >&2; exit 2; }
+[[ -n "$MODEL_SHORT" ]] || { echo "missing argument: --model-short" >&2; exit 2; }
+validate_prefix "$CONTAINER_PREFIX"
+
+HOST_HOME_ROOT="${HOST_HOME_ROOT%/}"
+if [[ "$HOST_HOME_ROOT" != /* ]]; then
+  echo "host home root must be absolute: $HOST_HOME_ROOT" >&2
+  exit 2
+fi
 
 if [[ -z "$IMAGE_PREFIX" ]]; then
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "DRY_RUN 模式不会连接节点解析 Image ID；请传入 --image-prefix 以验证最终容器名。" >&2
+    echo "DRY_RUN does not inspect remote image id; pass --image-prefix to verify final container name." >&2
     IMAGE_PREFIX="AUTO"
   else
     IMAGE_PREFIX="$(inspect_image_prefix)"
@@ -87,11 +105,12 @@ if [[ -z "$IMAGE_PREFIX" ]]; then
 fi
 
 if [[ -z "$CONTAINER_NAME" ]]; then
-  CONTAINER_NAME="lzh-agent-test-${DATE_PART}-${MODEL_SHORT}-${IMAGE_PREFIX}"
+  CONTAINER_NAME="${CONTAINER_PREFIX}-${DATE_PART}-${MODEL_SHORT}-${IMAGE_PREFIX}"
 fi
 
-if ! [[ "$CONTAINER_NAME" =~ ^lzh-agent-test-[0-9]{4}-[a-z0-9]+-[A-Za-z0-9]{4,}$ ]]; then
-  echo "容器名不符合规范: $CONTAINER_NAME" >&2
+if ! [[ "$CONTAINER_NAME" =~ ^${CONTAINER_PREFIX}-[0-9]{4}-[a-z0-9]+-[A-Za-z0-9]{4,}$ ]]; then
+  echo "Container name does not match convention: $CONTAINER_NAME" >&2
+  echo "Expected: ${CONTAINER_PREFIX}-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>" >&2
   exit 2
 fi
 
@@ -102,7 +121,7 @@ remote_run="docker run -itd --name=$CONTAINER_NAME \
   --ipc=host --group-add video \
   --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
   --ulimit stack=-1:-1 --ulimit memlock=-1:-1 \
-  -v /public/home/liuzhh8:/mnt \
+  -v ${HOST_HOME_ROOT}:/mnt \
   -v /module/:/module:ro \
   -v /public/opendas/DL_DATA/llm-models/:/model:ro \
   -v /public4/share/:/model1:ro \
@@ -111,6 +130,8 @@ remote_run="docker run -itd --name=$CONTAINER_NAME \
   $IMAGE bash"
 
 echo "CONTAINER_NAME=$CONTAINER_NAME"
+echo "CONTAINER_PREFIX=$CONTAINER_PREFIX"
+echo "HOST_HOME_ROOT=$HOST_HOME_ROOT"
 echo "IMAGE_PREFIX=$IMAGE_PREFIX"
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
@@ -120,7 +141,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
 fi
 
 if ssh "$NODE" "$remote_check" >/dev/null 2>&1; then
-  echo "容器已存在: $CONTAINER_NAME" >&2
+  echo "container already exists: $CONTAINER_NAME" >&2
   exit 1
 fi
 
