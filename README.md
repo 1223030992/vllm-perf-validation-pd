@@ -199,11 +199,11 @@ vllm-perf-validation-single/
 
 | 模型 | MODEL_SHORT | 端口 | TP | 精度 | custom | pchit fixed | pchit SLA-search | serial / parallel | 总状态 | 案例 |
 | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |
-| GLM-4.7-W8A8 | `glm47int8` | 9348 | 8 | int8 | ✅ stable | 🟢 passed | 🟢 passed | 🟠 experimental | ✅ stable | [custom](#101-glm-47-w8a8-single-custom-baseline), [fixed](#104-glm-47-w8a8-pchit-fixed), [SLA-search](#105-glm-47-w8a8-pchit-sla-search) |
-| GLM-5-W8A8 | `glm5int8` | 9349 | 8 | int8 | 🟡 not retested | 🟡 not tested | 🟡 not tested | 🟠 experimental | 🟡 integrated / needs retest | - |
-| GLM-5.1-Channel-INT8 | `glm51int8` | 9350 | 8 | int8 | 🟡 not retested | 🟢 historical passed | 🟡 not retested | 🟠 experimental | 🟡 integrated / needs retest | [historical pchit](#103-glm-51-channel-int8-pchit-历史冒烟) |
-| MiniMax-M2.5-W8A8 | `minimaxm25int8` | 9352 | 8 | int8 | 🟡 not tested | 🟡 not tested | 🟡 not tested | 🟠 experimental | 🟡 registered | - |
-| Kimi-K2.5-INT4 | `kimik25int4` | 9354 | 8 | int4 | 🟢 passed | 🟡 not tested | 🟡 not tested | 🟠 experimental | 🟢 passed | [custom](#102-kimi-k25-int4-single-custom-冒烟) |
+| GLM-4.7-W8A8 | `glm47int8` | 9348 | 8 | int8 | <span title="stable">✅</span> | <span title="passed">🟢</span> | <span title="passed">🟢</span> | <span title="experimental">🟠</span> | <span title="stable">✅</span> | [custom](#101-glm-47-w8a8-single-custom-baseline), [fixed](#104-glm-47-w8a8-pchit-fixed), [SLA-search](#105-glm-47-w8a8-pchit-sla-search) |
+| GLM-5-W8A8 | `glm5int8` | 9349 | 8 | int8 | <span title="not retested">🟡</span> | <span title="not tested">🟡</span> | <span title="not tested">🟡</span> | <span title="experimental">🟠</span> | <span title="integrated / needs retest">🟡</span> | - |
+| GLM-5.1-Channel-INT8 | `glm51int8` | 9350 | 8 | int8 | <span title="not retested">🟡</span> | <span title="historical passed">🟢</span> | <span title="not retested">🟡</span> | <span title="experimental">🟠</span> | <span title="integrated / needs retest">🟡</span> | [historical pchit](#103-glm-51-channel-int8-pchit-历史冒烟) |
+| MiniMax-M2.5-W8A8 | `minimaxm25int8` | 9352 | 8 | int8 | <span title="not tested">🟡</span> | <span title="not tested">🟡</span> | <span title="not tested">🟡</span> | <span title="experimental">🟠</span> | <span title="registered">🟡</span> | - |
+| Kimi-K2.5-INT4 | `kimik25int4` | 9354 | 8 | int4 | <span title="passed">🟢</span> | <span title="not tested">🟡</span> | <span title="not tested">🟡</span> | <span title="experimental">🟠</span> | <span title="passed">🟢</span> | [custom](#102-kimi-k25-int4-single-custom-冒烟) |
 
 说明：`model.precision` 表示模型/权重量化精度；`service.vllm_params.dtype` 表示计算 dtype；`kv_cache_dtype` 表示 KV cache 精度。Kimi 的模型精度为 `int4`，计算 dtype 为 `bfloat16`，KV cache 为 `fp8_e4m3`。
 
@@ -211,17 +211,17 @@ vllm-perf-validation-single/
 
 | 功能 | 状态 | 已验证范围 | 说明 |
 | --- | --- | --- | --- |
-| single custom | ✅ stable | GLM-4.7、Kimi | 主链路已可复用 |
-| 新模型标准化注册 | 🟢 usable | MiniMax、Kimi | 支持标准化 server script、注册 profile/example、输出 dry-run |
-| single pchit fixed | 🟢 passed | GLM-4.7 | 使用自研 `prefix_cache_benchmark.py`，完整跑并发列表 |
-| single pchit SLA-search | 🟢 passed | GLM-4.7 | 遇到首个 SLA FAIL 停止并输出 best concurrency |
-| `/v1/models` served_model_id 发现 | 🟢 passed | GLM-4.7、GLM-5.1、Kimi | benchmark 使用服务实际返回的 model id |
-| `resume_single_task.sh` | 🟠 partial / needs more validation | readiness 后恢复路径 | 已有入口，仍需更多中断场景验证 |
-| serial | 🟠 experimental | 示例和规则存在 | 未标记稳定 |
-| parallel | 🟠 experimental | 示例和规则存在 | 未标记稳定 |
-| 非 GLM pchit | 🟡 not tested | - | Kimi / MiniMax 尚未实测 pchit |
-| 多机多模型模式 | ⚪ planned | - | 待开发 |
-| sglang 模型扩展 | ⚪ planned | - | 待开发 |
+| single custom | <span title="stable">✅</span> | GLM-4.7、Kimi | 主链路已可复用 |
+| 新模型标准化注册 | <span title="usable">🟢</span> | MiniMax、Kimi | 支持标准化 server script、注册 profile/example、输出 dry-run |
+| single pchit fixed | <span title="passed">🟢</span> | GLM-4.7 | 使用自研 `prefix_cache_benchmark.py`，完整跑并发列表 |
+| single pchit SLA-search | <span title="passed">🟢</span> | GLM-4.7 | 遇到首个 SLA FAIL 停止并输出 best concurrency |
+| `/v1/models` served_model_id 发现 | <span title="passed">🟢</span> | GLM-4.7、GLM-5.1、Kimi | benchmark 使用服务实际返回的 model id |
+| `resume_single_task.sh` | <span title="partial / needs more validation">🟠</span> | readiness 后恢复路径 | 已有入口，仍需更多中断场景验证 |
+| serial | <span title="experimental">🟠</span> | 示例和规则存在 | 未标记稳定 |
+| parallel | <span title="experimental">🟠</span> | 示例和规则存在 | 未标记稳定 |
+| 非 GLM pchit | <span title="not tested">🟡</span> | - | Kimi / MiniMax 尚未实测 pchit |
+| 多机多模型模式 | <span title="planned">⚪</span> | - | 待开发 |
+| sglang 模型扩展 | <span title="planned">⚪</span> | - | 待开发 |
 
 ## 8. 给 Claude 的标准指令
 
