@@ -82,8 +82,24 @@ def load_csv(csv_file):
         return list(csv.DictReader(f))
 
 
+def normalize_status(row):
+    status = (row.get("status") or "").strip().upper()
+    if status:
+        return status
+    sla_pass = (row.get("sla_pass") or "").strip().lower()
+    if sla_pass in {"true", "1", "yes", "y", "pass"}:
+        return "PASS"
+    if sla_pass in {"false", "0", "no", "n", "fail"}:
+        return "FAIL"
+    return "SKIPPED"
+
+
+def truthy(value):
+    return str(value or "").strip().lower() in {"true", "1", "yes", "y", "pass"}
+
+
 def summarize(rows):
-    statuses = [row.get("status", "") for row in rows]
+    statuses = [normalize_status(row) for row in rows]
     numeric = {
         "max_qps": ["rps", "request_throughput", "qps"],
         "max_output_tok_s": ["generate_throughput_tok_s", "output_token_throughput"],
@@ -98,6 +114,10 @@ def summarize(rows):
         "partial": statuses.count("PARTIAL"),
         "failed": statuses.count("FAIL"),
         "skipped": statuses.count("SKIPPED"),
+        "max_effective_cache_hit_pct": None,
+        "completed_requests": None,
+        "failed_requests": None,
+        "best_sla_concurrency": None,
     }
     for out_key, candidates in numeric.items():
         values = []
@@ -113,6 +133,30 @@ def summarize(rows):
             result[out_key] = round(mean(values), 4)
         else:
             result[out_key] = round(max(values), 4)
+
+    effective_values = [as_float(row.get("effective_cache_hit_pct")) for row in rows]
+    effective_values = [value for value in effective_values if value is not None]
+    if effective_values:
+        result["max_effective_cache_hit_pct"] = round(max(effective_values), 4)
+
+    completed = [as_float(row.get("completed_requests")) for row in rows]
+    failed = [as_float(row.get("failed_requests")) for row in rows]
+    completed = [value for value in completed if value is not None]
+    failed = [value for value in failed if value is not None]
+    if completed:
+        result["completed_requests"] = int(sum(completed))
+    if failed:
+        result["failed_requests"] = int(sum(failed))
+
+    best_concurrency = []
+    for row, status in zip(rows, statuses):
+        if status == "PASS" or truthy(row.get("sla_pass")):
+            value = as_float(row.get("concurrency"))
+            if value is not None:
+                best_concurrency.append(value)
+    if best_concurrency:
+        result["best_sla_concurrency"] = int(max(best_concurrency))
+
     if result["failed"]:
         result["status"] = "FAIL"
     elif result["partial"]:
@@ -194,9 +238,13 @@ def main():
             "mode": deep_get(state, "test.mode"),
             "status": deep_get(state, "test.status", summary["status"]),
             "csv_file": str(csv_file),
+            "pchit_json_file": deep_get(state, "paths.pchit_json_file_host")
+            or deep_get(state, "paths.pchit_json_file"),
         },
         "results": {
             "csv_file": str(csv_file),
+            "pchit_json_file": deep_get(state, "paths.pchit_json_file_host")
+            or deep_get(state, "paths.pchit_json_file"),
             "log_file": log_file,
             "summary": summary,
         },
@@ -254,18 +302,27 @@ def main():
         "",
     ]
     if deep_get(state, "test.mode") == "pchit" or state.get("pchit"):
+        benchmark = state.get("pchit", {}).get("benchmark", {})
         warmup = state.get("pchit", {}).get("warmup", {})
         md_lines.extend(
             [
-                "## Prefix Cache 预热",
+                "## Prefix Cache Benchmark",
                 "",
-                "- 目标命中率: {}".format(warmup.get("target_pct")),
-                "- 容差: {}".format(warmup.get("tolerance_pct")),
-                "- 达标观测值: {}".format(warmup.get("observed_pct")),
-                "- 预热配置命中率: {}".format(warmup.get("warmup_rate")),
-                "- 预热轮数: {}".format(warmup.get("rounds")),
-                "- 预热耗时秒: {}".format(warmup.get("duration_seconds")),
-                "- 最近日志: `{}`".format(warmup.get("log_excerpt", "")),
+                "- Mode: {}".format(benchmark.get("mode")),
+                "- Target cache hit pct: {}".format(
+                    benchmark.get("target_pct") or warmup.get("target_pct")
+                ),
+                "- Max effective cache hit pct: {}".format(
+                    summary.get("max_effective_cache_hit_pct")
+                ),
+                "- Best SLA concurrency: {}".format(summary.get("best_sla_concurrency")),
+                "- Completed requests: {}".format(summary.get("completed_requests")),
+                "- Failed requests: {}".format(summary.get("failed_requests")),
+                "- pchit JSON: `{}`".format(
+                    deep_get(state, "paths.pchit_json_file_host")
+                    or deep_get(state, "paths.pchit_json_file")
+                    or ""
+                ),
                 "",
             ]
         )
@@ -284,6 +341,27 @@ def main():
     set_path(state, "report.run_id", args.run_id)
     set_path(state, "report.status", final_status)
     set_path(state, "report.generated_at", report["generated_at"])
+    if deep_get(state, "test.mode") == "pchit" or state.get("pchit"):
+        set_path(
+            state,
+            "pchit.benchmark.effective_cache_hit_pct",
+            summary.get("max_effective_cache_hit_pct"),
+        )
+        set_path(
+            state,
+            "pchit.benchmark.best_sla_concurrency",
+            summary.get("best_sla_concurrency"),
+        )
+        set_path(
+            state,
+            "pchit.benchmark.completed_requests",
+            summary.get("completed_requests"),
+        )
+        set_path(
+            state,
+            "pchit.benchmark.failed_requests",
+            summary.get("failed_requests"),
+        )
     try:
         state_file.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     except OSError as exc:

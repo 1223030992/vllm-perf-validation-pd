@@ -62,6 +62,28 @@ def csv_summary(csv_file):
         vals = values(keys)
         if vals:
             summary[label] = max(vals)
+
+    effective = values(["effective_cache_hit_pct"])
+    if effective:
+        summary["pchit_effective_pct"] = max(effective)
+
+    completed = values(["completed_requests"])
+    failed = values(["failed_requests"])
+    if completed:
+        summary["completed_requests"] = int(sum(completed))
+    if failed:
+        summary["failed_requests"] = int(sum(failed))
+
+    best_sla = []
+    for row in rows:
+        status = (row.get("status") or "").strip().upper()
+        sla_pass = (row.get("sla_pass") or "").strip().lower()
+        if status == "PASS" or sla_pass in {"true", "1", "yes", "y", "pass"}:
+            value = first_number(row, ["concurrency"])
+            if value is not None:
+                best_sla.append(value)
+    if best_sla:
+        summary["pchit_best_sla_concurrency"] = int(max(best_sla))
     return summary
 
 
@@ -96,6 +118,10 @@ def main():
         ("stop_status", "status"),
         ("port_released", "service.port_released"),
         ("failure_reason", "failure.reason"),
+        ("pchit_benchmark_mode", "pchit.benchmark.mode"),
+        ("pchit_benchmark_target_pct", "pchit.benchmark.target_pct"),
+        ("pchit_effective_pct", "pchit.benchmark.effective_cache_hit_pct"),
+        ("pchit_best_sla_concurrency", "pchit.benchmark.best_sla_concurrency"),
         ("pchit_warmup_status", "pchit.warmup.status"),
         ("pchit_target_pct", "pchit.warmup.target_pct"),
         ("pchit_observed_pct", "pchit.warmup.observed_pct"),

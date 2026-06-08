@@ -17,7 +17,7 @@ Usage:
     --host-model-path PATH --container-model-path PATH --server-script SCRIPT \
     --port PORT --tp TP --gpu-range RANGE --test-mode pchit \
     --input-len 32768 --output-len 1024 --pc-hit-target 90 \
-    --batches "1,2,3,4,5,6,7,8" [--warmup-cache-hit-rates "92,95"]
+    --batches "1,2,3,4,5,6,7,8" [--pchit-benchmark-mode fixed]
 
 Common options:
   --profile PROFILE_OR_SHORT
@@ -215,6 +215,12 @@ WARMUP_CONCURRENCY_MULTIPLIER=4
 PC_HIT_TOLERANCE=1
 PC_HIT_TIMEOUT=1800
 PC_HIT_INTERVAL=30
+PCHIT_BENCHMARK_MODE="fixed"
+TTFT_SLA_MS=5000
+TPOT_SLA_MS=50
+SLA_STAT="mean"
+PREFIX_WARMUP_REQUESTS=1
+CASE_WARMUP_REPEATS=0
 DATE_PART="$(date +%m%d)"
 IMAGE_PREFIX=""
 CONTAINER=""
@@ -271,6 +277,12 @@ while [[ $# -gt 0 ]]; do
     --pc-hit-tolerance) PC_HIT_TOLERANCE="$2"; shift 2 ;;
     --pc-hit-timeout) PC_HIT_TIMEOUT="$2"; shift 2 ;;
     --pc-hit-interval) PC_HIT_INTERVAL="$2"; shift 2 ;;
+    --pchit-benchmark-mode) PCHIT_BENCHMARK_MODE="$2"; shift 2 ;;
+    --ttft-sla-ms) TTFT_SLA_MS="$2"; shift 2 ;;
+    --tpot-sla-ms) TPOT_SLA_MS="$2"; shift 2 ;;
+    --sla-stat) SLA_STAT="$2"; shift 2 ;;
+    --prefix-warmup-requests) PREFIX_WARMUP_REQUESTS="$2"; shift 2 ;;
+    --case-warmup-repeats) CASE_WARMUP_REPEATS="$2"; shift 2 ;;
     --date) DATE_PART="$2"; shift 2 ;;
     --image-prefix) IMAGE_PREFIX="$2"; shift 2 ;;
     --container) CONTAINER="$2"; shift 2 ;;
@@ -316,6 +328,8 @@ elif [[ "$TEST_MODE" == "pchit" ]]; then
   [[ -n "$INPUT_LEN" ]] || { echo "pchit mode missing --input-len" >&2; exit 2; }
   [[ -n "$OUTPUT_LEN" ]] || { echo "pchit mode missing --output-len" >&2; exit 2; }
   [[ -n "$PC_HIT_TARGET" ]] || { echo "pchit mode missing --pc-hit-target" >&2; exit 2; }
+  [[ "$PCHIT_BENCHMARK_MODE" == "fixed" || "$PCHIT_BENCHMARK_MODE" == "sla-search" ]] || { echo "pchit --pchit-benchmark-mode must be fixed or sla-search" >&2; exit 2; }
+  [[ "$SLA_STAT" == "mean" || "$SLA_STAT" == "p95" || "$SLA_STAT" == "p99" ]] || { echo "--sla-stat must be mean, p95, or p99" >&2; exit 2; }
   [[ -n "$CACHE_HIT_RATES" ]] || CACHE_HIT_RATES="$PC_HIT_TARGET"
   [[ -n "$BATCHES" ]] || BATCHES="1,2,3,4,5,6,7,8"
 else
@@ -370,16 +384,11 @@ if [[ "$DRY_RUN" == "1" ]]; then
   echo "  2. create_container.sh"
   echo "  3. start_vllm_service.sh"
   echo "  4. wait_vllm_ready.sh"
-  if [[ "$TEST_MODE" == "pchit" ]]; then
-    echo "  5. pchit_warmup.sh"
-    echo "  6. run_bench.sh"
-  else
-    echo "  5. run_bench.sh"
-  fi
-  echo "  7. render_report.py"
-  echo "  8. stop_service.sh"
-  echo "  9. render_report.py"
-  echo "  10. show_state.sh"
+  echo "  5. run_bench.sh"
+  echo "  6. render_report.py"
+  echo "  7. stop_service.sh"
+  echo "  8. render_report.py"
+  echo "  9. show_state.sh"
   cat <<EOF
 
 Key parameters:
@@ -412,6 +421,12 @@ Key parameters:
   PC_HIT_TOLERANCE=$PC_HIT_TOLERANCE
   PC_HIT_TIMEOUT=$PC_HIT_TIMEOUT
   PC_HIT_INTERVAL=$PC_HIT_INTERVAL
+  PCHIT_BENCHMARK_MODE=$PCHIT_BENCHMARK_MODE
+  TTFT_SLA_MS=$TTFT_SLA_MS
+  TPOT_SLA_MS=$TPOT_SLA_MS
+  SLA_STAT=$SLA_STAT
+  PREFIX_WARMUP_REQUESTS=$PREFIX_WARMUP_REQUESTS
+  CASE_WARMUP_REPEATS=$CASE_WARMUP_REPEATS
   TIMEOUT=$TIMEOUT
   HOST_HOME_ROOT=$HOST_HOME_ROOT
   OUTPUT_HOST_ROOT=$OUTPUT_HOST_ROOT
@@ -490,7 +505,14 @@ python3 "$SCRIPT_DIR/update_state.py" --state "$STATE_HOST" \
   --set "pchit.warmup.concurrency_multiplier=$WARMUP_CONCURRENCY_MULTIPLIER" \
   --set "pchit.warmup.tolerance_pct=$PC_HIT_TOLERANCE" \
   --set "pchit.warmup.timeout_seconds=$PC_HIT_TIMEOUT" \
-  --set "pchit.warmup.interval_seconds=$PC_HIT_INTERVAL" || true
+  --set "pchit.warmup.interval_seconds=$PC_HIT_INTERVAL" \
+  --set "pchit.benchmark.mode=$PCHIT_BENCHMARK_MODE" \
+  --set "pchit.benchmark.target_pct=$PC_HIT_TARGET" \
+  --set "pchit.benchmark.ttft_sla_ms=$TTFT_SLA_MS" \
+  --set "pchit.benchmark.tpot_sla_ms=$TPOT_SLA_MS" \
+  --set "pchit.benchmark.sla_stat=$SLA_STAT" \
+  --set "pchit.benchmark.prefix_warmup_requests=$PREFIX_WARMUP_REQUESTS" \
+  --set "pchit.benchmark.case_warmup_repeats=$CASE_WARMUP_REPEATS" || true
 
 run_step_capture "wait_vllm_ready" "$TMP_DIR/wait.out" \
   env VERBOSE=1 SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" \
@@ -508,34 +530,6 @@ SERVED_MODEL_ID="$(extract_value SERVED_MODEL_ID "$TMP_DIR/wait.out")"
 [[ -n "$SERVED_MODEL_ID" ]] || { echo "wait_vllm_ready did not output SERVED_MODEL_ID" >&2; exit 1; }
 
 if [[ "$TEST_MODE" == "pchit" ]]; then
-  run_step_capture "pchit_warmup" "$TMP_DIR/pchit_warmup.out" \
-    env SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" \
-      OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" \
-      OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" \
-      bash "$SCRIPT_DIR/pchit_warmup.sh" \
-        --node "$NODE" \
-        --container "$CONTAINER" \
-        --served-model-id "$SERVED_MODEL_ID" \
-        --port "$PORT" \
-        --tp "$TP" \
-        --work-dir "$WORK_DIR_CONTAINER" \
-        --state "$STATE_CONTAINER" \
-        --log "$LOG_CONTAINER" \
-        --input-len "$INPUT_LEN" \
-        --output-len "$OUTPUT_LEN" \
-        --pc-hit-target "$PC_HIT_TARGET" \
-        --warmup-cache-hit-rates "$WARMUP_CACHE_HIT_RATES" \
-        --batches "$BATCHES" \
-        --warmup-concurrency-multiplier "$WARMUP_CONCURRENCY_MULTIPLIER" \
-        --pc-hit-tolerance "$PC_HIT_TOLERANCE" \
-        --pc-hit-timeout "$PC_HIT_TIMEOUT" \
-        --pc-hit-interval "$PC_HIT_INTERVAL"
-
-  PCHIT_OBSERVED_PC_HIT_PCT="$(extract_value OBSERVED_PC_HIT_PCT "$TMP_DIR/pchit_warmup.out")"
-  PCHIT_WARMUP_RATE="$(extract_value WARMUP_RATE "$TMP_DIR/pchit_warmup.out")"
-  PCHIT_WARMUP_ROUNDS="$(extract_value PCHIT_WARMUP_ROUNDS "$TMP_DIR/pchit_warmup.out")"
-  PCHIT_WARMUP_DURATION_SECONDS="$(extract_value PCHIT_WARMUP_DURATION_SECONDS "$TMP_DIR/pchit_warmup.out")"
-
   run_step_capture "run_bench" "$TMP_DIR/bench.out" \
     env SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" \
       OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" \
@@ -547,10 +541,13 @@ if [[ "$TEST_MODE" == "pchit" ]]; then
       BATCHES="$BATCHES" \
       CONCURRENCY_MULTIPLIER="$CONCURRENCY_MULTIPLIER" \
       PCHIT_TARGET_PCT="$PC_HIT_TARGET" \
-      PCHIT_OBSERVED_PC_HIT_PCT="$PCHIT_OBSERVED_PC_HIT_PCT" \
-      PCHIT_WARMUP_RATE="$PCHIT_WARMUP_RATE" \
-      PCHIT_WARMUP_ROUNDS="$PCHIT_WARMUP_ROUNDS" \
-      PCHIT_WARMUP_DURATION_SECONDS="$PCHIT_WARMUP_DURATION_SECONDS" \
+      PCHIT_BENCHMARK_MODE="$PCHIT_BENCHMARK_MODE" \
+      TTFT_SLA_MS="$TTFT_SLA_MS" \
+      TPOT_SLA_MS="$TPOT_SLA_MS" \
+      SLA_STAT="$SLA_STAT" \
+      PREFIX_WARMUP_REQUESTS="$PREFIX_WARMUP_REQUESTS" \
+      CASE_WARMUP_REPEATS="$CASE_WARMUP_REPEATS" \
+      REQUEST_RATE="$REQUEST_RATE" \
       bash "$SCRIPT_DIR/run_bench.sh" \
         --node "$NODE" \
         --container "$CONTAINER" \

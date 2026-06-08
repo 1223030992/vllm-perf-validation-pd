@@ -12,7 +12,7 @@ Purpose:
   SERVICE_TIMEOUT, SERVICE_STARTED, or WAITING_READY.
 
 Sequence:
-  wait_vllm_ready.sh -> [pchit_warmup.sh] -> run_bench.sh -> render_report.py -> stop_service.sh
+  wait_vllm_ready.sh -> run_bench.sh -> render_report.py -> stop_service.sh
   -> render_report.py -> show_state.sh
 
 It does not create containers, start services, run docker rm, or hand-write SSH/Docker/vLLM commands.
@@ -130,12 +130,19 @@ if [[ "$DRY_RUN" != "1" ]]; then
   CACHE_HIT_RATES="$(state_get test.params.cache_hit_rates)"
   BATCHES="$(state_get test.params.batches)"
   CONCURRENCY_MULTIPLIER="$(state_get test.params.concurrency_multiplier)"
-  PC_HIT_TARGET="$(state_get pchit.warmup.target_pct)"
+  PC_HIT_TARGET="$(state_get pchit.benchmark.target_pct)"
+  [[ -n "$PC_HIT_TARGET" ]] || PC_HIT_TARGET="$(state_get pchit.warmup.target_pct)"
   WARMUP_CACHE_HIT_RATES="$(state_get pchit.warmup.cache_hit_rates)"
   WARMUP_CONCURRENCY_MULTIPLIER="$(state_get pchit.warmup.concurrency_multiplier)"
   PC_HIT_TOLERANCE="$(state_get pchit.warmup.tolerance_pct)"
   PC_HIT_TIMEOUT="$(state_get pchit.warmup.timeout_seconds)"
   PC_HIT_INTERVAL="$(state_get pchit.warmup.interval_seconds)"
+  PCHIT_BENCHMARK_MODE="$(state_get pchit.benchmark.mode)"
+  TTFT_SLA_MS="$(state_get pchit.benchmark.ttft_sla_ms)"
+  TPOT_SLA_MS="$(state_get pchit.benchmark.tpot_sla_ms)"
+  SLA_STAT="$(state_get pchit.benchmark.sla_stat)"
+  PREFIX_WARMUP_REQUESTS="$(state_get pchit.benchmark.prefix_warmup_requests)"
+  CASE_WARMUP_REPEATS="$(state_get pchit.benchmark.case_warmup_repeats)"
   [[ -n "$TIMEOUT" ]] || TIMEOUT="$(state_get timing.readiness_timeout_seconds)"
   [[ -n "$TIMEOUT" ]] || TIMEOUT=3600
   if [[ -z "$REPORT_DIR" ]]; then
@@ -164,6 +171,12 @@ else
   PC_HIT_TOLERANCE="<PC_HIT_TOLERANCE_FROM_STATE>"
   PC_HIT_TIMEOUT="<PC_HIT_TIMEOUT_FROM_STATE>"
   PC_HIT_INTERVAL="<PC_HIT_INTERVAL_FROM_STATE>"
+  PCHIT_BENCHMARK_MODE="<PCHIT_BENCHMARK_MODE_FROM_STATE>"
+  TTFT_SLA_MS="<TTFT_SLA_MS_FROM_STATE>"
+  TPOT_SLA_MS="<TPOT_SLA_MS_FROM_STATE>"
+  SLA_STAT="<SLA_STAT_FROM_STATE>"
+  PREFIX_WARMUP_REQUESTS="<PREFIX_WARMUP_REQUESTS_FROM_STATE>"
+  CASE_WARMUP_REPEATS="<CASE_WARMUP_REPEATS_FROM_STATE>"
   TIMEOUT="${TIMEOUT:-3600}"
   REPORT_DIR="${REPORT_DIR:-${OUTPUT_HOST_ROOT}/reports}"
   RUN_ID="${RUN_ID:-<RUN_ID_FROM_STATE>}"
@@ -195,31 +208,6 @@ else
 fi
 [[ -n "$SERVED_MODEL_ID" ]] || { echo "wait_vllm_ready did not output SERVED_MODEL_ID" >&2; exit 1; }
 
-if [[ "$TEST_MODE" == "pchit" ]]; then
-  run_step_capture "resume_pchit_warmup" "$TMP_DIR/pchit_warmup.out" \
-    env SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" \
-      OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" \
-      OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" \
-      bash "$SCRIPT_DIR/pchit_warmup.sh" \
-        --node "$NODE" \
-        --container "$CONTAINER" \
-        --served-model-id "$SERVED_MODEL_ID" \
-        --port "$PORT" \
-        --tp "$TP" \
-        --work-dir "$WORK_DIR_CONTAINER" \
-        --state "$STATE_CONTAINER" \
-        --log "$LOG_CONTAINER" \
-        --input-len "$INPUT_LEN" \
-        --output-len "$OUTPUT_LEN" \
-        --pc-hit-target "$PC_HIT_TARGET" \
-        --warmup-cache-hit-rates "$WARMUP_CACHE_HIT_RATES" \
-        --batches "$BATCHES" \
-        --warmup-concurrency-multiplier "$WARMUP_CONCURRENCY_MULTIPLIER" \
-        --pc-hit-tolerance "$PC_HIT_TOLERANCE" \
-        --pc-hit-timeout "$PC_HIT_TIMEOUT" \
-        --pc-hit-interval "$PC_HIT_INTERVAL"
-fi
-
 run_step_capture "resume_run_bench" "$TMP_DIR/bench.out" \
   env SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" \
     OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" \
@@ -229,6 +217,13 @@ run_step_capture "resume_run_bench" "$TMP_DIR/bench.out" \
     CACHE_HIT_RATES="$CACHE_HIT_RATES" \
     BATCHES="$BATCHES" \
     CONCURRENCY_MULTIPLIER="$CONCURRENCY_MULTIPLIER" \
+    PCHIT_TARGET_PCT="$PC_HIT_TARGET" \
+    PCHIT_BENCHMARK_MODE="$PCHIT_BENCHMARK_MODE" \
+    TTFT_SLA_MS="$TTFT_SLA_MS" \
+    TPOT_SLA_MS="$TPOT_SLA_MS" \
+    SLA_STAT="$SLA_STAT" \
+    PREFIX_WARMUP_REQUESTS="$PREFIX_WARMUP_REQUESTS" \
+    CASE_WARMUP_REPEATS="$CASE_WARMUP_REPEATS" \
     bash "$SCRIPT_DIR/run_bench.sh" \
       --node "$NODE" \
       --container "$CONTAINER" \
