@@ -12,7 +12,7 @@ GitHub: <https://github.com/1223030992/vllm-perf-validation-single>
 - [2. 快速使用方式](#2-快速使用方式)
 - [3. 路径替换](#3-路径替换)
 - [4. 项目结构](#4-项目结构)
-- [5. 状态图例](#5-状态图例)
+- [5. 状态示例与测试模式介绍](#5-状态示例与测试模式介绍)
 - [6. 模型支持矩阵](#6-模型支持矩阵)
 - [7. 功能测试矩阵](#7-功能测试矩阵)
 - [8. 给 Claude 的标准指令](#8-给-claude-的标准指令)
@@ -161,7 +161,7 @@ vllm-perf-validation-single/
 | `scripts/client-scripts/prefix_cache_benchmark.py` | 新 pchit 默认 benchmark 客户端 |
 | `scripts/ops/pchit_warmup.sh` | 旧 pchit server-log 预热兼容入口，新测试不推荐 |
 
-## 5. 状态图例
+## 5. 状态示例与测试模式介绍
 
 | 状态 | 含义 |
 | --- | --- |
@@ -172,6 +172,14 @@ vllm-perf-validation-single/
 | 🟠 experimental | 有实现或示例，但仍需深测 |
 | 🔴 blocked | 已知阻塞 |
 | ⚪ planned | 待开发 |
+
+| 测试模式 | 适用场景 | 当前建议 |
+| --- | --- | --- |
+| `custom` | 灵活组合 `input_lens`、`output_len`、`concurrencies`、请求数倍率和分位数，适合快速冒烟、baseline 和临时验证。 | 单模型优先使用，当前最稳定。 |
+| `pchit` | 使用自研 prefix cache benchmark，通过共享前缀和随机后缀构造指定 PC 命中率，适合需要稳定控制 prefix cache hit 的长上下文场景。 | 已完成 GLM-4.7 fixed / SLA-search 实测，推荐用于 PC 命中率专项测试。 |
+| `full` | 覆盖更完整的输入/输出/并发组合，适合周期性回归或全面性能摸底。 | 参数组合多，执行前建议先用 `custom` 冒烟。 |
+| `engin` | 面向固定输出长度和引擎侧能力验证的测试入口，适合对齐已有 `run_perf_test-engin.sh` 规则。 | 已有脚本，仍需更多真实回归。 |
+| `serial` / `parallel` | 多模型串行或并行调度验证，关注容器生命周期、端口释放和多任务隔离。 | 实验性，暂不作为稳定回归入口。 |
 
 ## 6. 模型支持矩阵
 
