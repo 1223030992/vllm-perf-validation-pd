@@ -16,11 +16,33 @@ from pathlib import Path
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[2]
+
+
+def infer_user_from_skill_root():
+    root = SKILL_ROOT.as_posix().rstrip("/")
+    for marker in ("/public/home/", "/public2/home/"):
+        if marker in root:
+            tail = root.split(marker, 1)[1]
+            user = tail.split("/", 1)[0]
+            if user:
+                return user
+    return os.environ.get("SKILL_USER") or os.environ.get("USER") or os.environ.get("LOGNAME") or "<user>"
+
+
+DEFAULT_USER = infer_user_from_skill_root()
+DEFAULT_ABBR = os.environ.get("USER_ABBR", DEFAULT_USER)
+DEFAULT_HOME_ROOT = os.environ.get("HOME_ROOT", "/public/home").rstrip("/")
+DEFAULT_HOST_HOME_ROOT = os.environ.get("HOST_HOME_ROOT", DEFAULT_HOME_ROOT + "/" + DEFAULT_USER).rstrip("/")
 DEFAULT_SKILL_HOST_ROOT = os.environ.get(
-    "SKILL_HOST_ROOT", "/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single"
+    "SKILL_HOST_ROOT", DEFAULT_HOST_HOME_ROOT + "/.claude/skills/vllm-perf-validation-single"
 ).rstrip("/")
-STANDARDIZE_SCRIPT = DEFAULT_SKILL_HOST_ROOT + "/scripts/ops/standardize_server_script.sh"
-REGISTER_MODEL = DEFAULT_SKILL_HOST_ROOT + "/scripts/ops/register_model.sh"
+DEFAULT_OUTPUT_HOST_ROOT = os.environ.get(
+    "OUTPUT_HOST_ROOT", DEFAULT_HOST_HOME_ROOT + "/skilltest/vllm-perf-validation-single"
+).rstrip("/")
+DEFAULT_OUTPUT_CONTAINER_ROOT = os.environ.get(
+    "OUTPUT_CONTAINER_ROOT", "/mnt/skilltest/vllm-perf-validation-single"
+).rstrip("/")
+DEFAULT_CONTAINER_PREFIX = os.environ.get("CONTAINER_PREFIX", DEFAULT_ABBR + "-agent-test")
 
 
 GENERIC_EXPORTS = set(
@@ -172,7 +194,11 @@ def build_script(args, original_text):
 def print_next_register_command(args, service_script):
     command = [
         "bash",
-        REGISTER_MODEL,
+        args.register_model,
+        "--user",
+        args.user,
+        "--abbr",
+        args.abbr,
         "--model-name",
         args.model_name,
         "--model-short",
@@ -183,6 +209,12 @@ def print_next_register_command(args, service_script):
         args.container_model_path,
         "--server-script",
         service_script,
+        "--output-host-root",
+        args.output_host_root,
+        "--output-container-root",
+        args.output_container_root,
+        "--container-prefix",
+        args.container_prefix,
         "--port",
         str(args.port),
         "--tp",
@@ -198,11 +230,21 @@ def print_next_register_command(args, service_script):
 def print_self_command(args, service_script):
     command = [
         "bash",
-        STANDARDIZE_SCRIPT,
+        args.standardize_script,
+        "--user",
+        args.user,
+        "--abbr",
+        args.abbr,
         "--model-name",
         args.model_name,
         "--server-script",
         service_script,
+        "--output-host-root",
+        args.output_host_root,
+        "--output-container-root",
+        args.output_container_root,
+        "--container-prefix",
+        args.container_prefix,
         "--container-model-path",
         args.container_model_path,
         "--port",
@@ -221,6 +263,14 @@ def print_self_command(args, service_script):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Standardize a vLLM server script")
+    parser.add_argument("--user")
+    parser.add_argument("--abbr")
+    parser.add_argument("--home-root", default=DEFAULT_HOME_ROOT)
+    parser.add_argument("--host-home-root")
+    parser.add_argument("--skill-host-root")
+    parser.add_argument("--output-host-root")
+    parser.add_argument("--output-container-root", default=DEFAULT_OUTPUT_CONTAINER_ROOT)
+    parser.add_argument("--container-prefix")
     parser.add_argument("--model-name", required=True)
     parser.add_argument("--server-script", required=True)
     parser.add_argument("--container-model-path", required=True)
@@ -234,8 +284,33 @@ def parse_args():
     return parser.parse_args()
 
 
+def apply_runtime_config(args):
+    args.user = args.user or DEFAULT_USER
+    if not args.user or args.user == "<user>":
+        raise SystemExit("missing runtime user; pass --user <linux_user>")
+    args.abbr = args.abbr or args.user
+    args.home_root = args.home_root.rstrip("/")
+    if args.home_root == "/public2/home":
+        args.home_root = "/public/home"
+    args.host_home_root = (args.host_home_root or args.home_root + "/" + args.user).rstrip("/")
+    args.skill_host_root = (
+        args.skill_host_root
+        or args.host_home_root + "/.claude/skills/vllm-perf-validation-single"
+    ).rstrip("/")
+    args.output_host_root = (
+        args.output_host_root
+        or args.host_home_root + "/skilltest/vllm-perf-validation-single"
+    ).rstrip("/")
+    args.output_container_root = args.output_container_root.rstrip("/")
+    args.container_prefix = args.container_prefix or args.abbr + "-agent-test"
+    args.standardize_script = args.skill_host_root + "/scripts/ops/standardize_server_script.sh"
+    args.register_model = args.skill_host_root + "/scripts/ops/register_model.sh"
+    return args
+
+
 def main():
     args = parse_args()
+    args = apply_runtime_config(args)
     script_path = resolve_path(args.server_script)
     if not script_path.exists():
         raise SystemExit("server script does not exist: {}".format(script_path))
@@ -252,6 +327,11 @@ def main():
     print("PORT={}".format(args.port))
     print("TP={}".format(args.tp))
     print("GPU_RANGE={}".format(args.gpu_range))
+    print("USER={}".format(args.user))
+    print("ABBR={}".format(args.abbr))
+    print("SKILL_HOST_ROOT={}".format(args.skill_host_root))
+    print("OUTPUT_HOST_ROOT={}".format(args.output_host_root))
+    print("CONTAINER_PREFIX={}".format(args.container_prefix))
 
     if original == standardized:
         print("STATUS=already_standardized")

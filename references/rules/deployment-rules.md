@@ -9,10 +9,10 @@
 ### 容器命名格式
 
 ```
-lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>
+<container_prefix>-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>
 
 示例：
-lzh-agent-test-0428-glm47int8-2540
+<container_prefix>-0428-glm47int8-2540
 ```
 
 MODEL_SHORT 规则：
@@ -29,7 +29,7 @@ MODEL_SHORT 规则：
 <MODEL>-<TEST_MODE>-<DATE>-<CONTAINER_NAME>/
 
 示例：
-/public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs/GLM-4.7-W8A8-serial-full-20260515-lzh-agent-test-0428-glm47int8-2540/
+/public/home/<user>/skilltest/vllm-perf-validation-single/work_dirs/GLM-4.7-W8A8-serial-full-20260515-<container_prefix>-0428-glm47int8-2540/
 ```
 
 ---
@@ -93,13 +93,13 @@ ssh <NODE_IP> "ss -tlnp | grep -E ':(9348|9350)' || echo 'Ports 9348/9350 free'"
 ssh <NODE_IP> "test -d /public/opendas/DL_DATA/llm-models/glm4.7/GLM-4.7-W8A8 && echo '模型目录存在' || echo '模型目录不存在'"
 
 # 8. 日志目录
-ssh <NODE_IP> "test -d /public/home/liuzhh8 && touch /public/home/liuzhh8/.test_write 2>&1 && rm /public/home/liuzhh8/.test_write && echo 'WRITABLE' || echo 'NOT WRITABLE'"
+ssh <NODE_IP> "test -d /public/home/<user> && touch /public/home/<user>/.test_write 2>&1 && rm /public/home/<user>/.test_write && echo 'WRITABLE' || echo 'NOT WRITABLE'"
 
 # 9. 磁盘空间
-ssh <NODE_IP> "df -h /public/home/liuzhh8 | tail -1"
+ssh <NODE_IP> "df -h /public/home/<user> | tail -1"
 
 # 10. 容器名冲突
-ssh <NODE_IP> "docker ps -a --format '{{.Names}}' | grep 'lzh-agent-test' || echo '无容器名冲突'"
+ssh <NODE_IP> "docker ps -a --format '{{.Names}}' | grep '<container_prefix>' || echo '无容器名冲突'"
 
 # 11. 镜像是否存在（按 IMAGE ID 精确匹配，使用 docker image inspect）
 ssh <NODE_IP> "docker image inspect 25401bd053af --format '{{.RepoTags}}' 2>/dev/null || echo '镜像不存在'"

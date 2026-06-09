@@ -18,10 +18,8 @@ quote_sh() {
 
 state_host_path() {
   local state="$1"
-  local output_container_root="${OUTPUT_CONTAINER_ROOT:-/mnt/skilltest/vllm-perf-validation-single}"
-  local output_host_root="${OUTPUT_HOST_ROOT:-/public/home/liuzhh8/skilltest/vllm-perf-validation-single}"
-  if [[ "$state" == "$output_container_root"* ]]; then
-    printf '%s%s\n' "$output_host_root" "${state#$output_container_root}"
+  if [[ "$state" == "$OUTPUT_CONTAINER_ROOT"* ]]; then
+    printf '%s%s\n' "$OUTPUT_HOST_ROOT" "${state#$OUTPUT_CONTAINER_ROOT}"
   else
     printf '%s\n' "$state"
   fi
@@ -30,9 +28,23 @@ state_host_path() {
 NODE=""
 STATE=""
 FULL=0
-SKILL_HOST_ROOT="${SKILL_HOST_ROOT:-/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/runtime_config.sh"
+SKILL_USER=""
+USER_ABBR=""
+HOME_ROOT=""
+HOST_HOME_ROOT=""
+SKILL_HOST_ROOT="${SKILL_HOST_ROOT:-}"
+OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-}"
+CONTAINER_PREFIX=""
 
 while [[ $# -gt 0 ]]; do
+  if runtime_config_parse_common_arg "$1" "${2-}"; then
+    shift 2
+    continue
+  fi
   case "$1" in
     --node) NODE="$2"; shift 2 ;;
     --state) STATE="$2"; shift 2 ;;
@@ -43,6 +55,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$STATE" ]] || { echo "缺少参数: --state" >&2; exit 2; }
+resolve_runtime_config
 STATE_HOST="$(state_host_path "$STATE")"
 
 FULL_ARG=""
@@ -53,6 +66,5 @@ fi
 if [[ -n "$NODE" ]]; then
   ssh "$NODE" "python3 $(quote_sh "$SKILL_HOST_ROOT/scripts/ops/show_state.py") --state $(quote_sh "$STATE_HOST")$FULL_ARG"
 else
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   python3 "$SCRIPT_DIR/show_state.py" --state "$STATE_HOST" ${FULL_ARG}
 fi

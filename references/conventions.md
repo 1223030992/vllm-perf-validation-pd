@@ -25,10 +25,10 @@
 ## 容器命名格式
 
 ```
-lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>
+<container_prefix>-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>
 
 示例：
-lzh-agent-test-0428-glm47int8-2540
+<container_prefix>-0428-glm47int8-2540
 
 说明：
 - lzh: 固定前缀
@@ -46,13 +46,13 @@ lzh-agent-test-0428-glm47int8-2540
 <MODEL>-<TEST_MODE>-<DATE>-<CONTAINER_NAME>/
 
 示例：
-GLM-4.7-W8A8-serial-full-20260515-lzh-agent-test-0428-glm47int8-2540/
+GLM-4.7-W8A8-serial-full-20260515-<container_prefix>-0428-glm47int8-2540/
 
 说明：
 - MODEL: GLM-4.7-W8A8（模型全名）
 - TEST_MODE: <执行模式>-<测试模式>，如 serial-full、parallel-custom、single-engin
 - DATE: 20260515（月日年）
-- CONTAINER_NAME: lzh-agent-test-0428-glm47int8-2540
+- CONTAINER_NAME: <container_prefix>-0428-glm47int8-2540
 ```
 
 ---

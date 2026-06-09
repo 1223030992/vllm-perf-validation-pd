@@ -30,7 +30,7 @@ quote_sh() {
 to_host_path() {
   local path="$1"
   local output_container_root="${OUTPUT_CONTAINER_ROOT:-/mnt/skilltest/vllm-perf-validation-single}"
-  local output_host_root="${OUTPUT_HOST_ROOT:-/public/home/liuzhh8/skilltest/vllm-perf-validation-single}"
+  local output_host_root="$OUTPUT_HOST_ROOT"
   if [[ "$path" == "$output_container_root"* ]]; then
     printf '%s%s\n' "$output_host_root" "${path#$output_container_root}"
   else
@@ -41,7 +41,7 @@ to_host_path() {
 to_container_path() {
   local path="$1"
   local output_container_root="${OUTPUT_CONTAINER_ROOT:-/mnt/skilltest/vllm-perf-validation-single}"
-  local output_host_root="${OUTPUT_HOST_ROOT:-/public/home/liuzhh8/skilltest/vllm-perf-validation-single}"
+  local output_host_root="$OUTPUT_HOST_ROOT"
   if [[ "$path" == "$output_host_root"* ]]; then
     printf '%s%s\n' "$output_container_root" "${path#$output_host_root}"
   else
@@ -95,9 +95,23 @@ TP=""
 WORK_DIR=""
 STATE=""
 DRY_RUN="${DRY_RUN:-0}"
-SKILL_CONTAINER_ROOT="${SKILL_CONTAINER_ROOT:-/mnt/.claude/skills/vllm-perf-validation-single}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/runtime_config.sh"
+SKILL_USER=""
+USER_ABBR=""
+HOME_ROOT=""
+HOST_HOME_ROOT=""
+SKILL_HOST_ROOT=""
+OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-}"
+CONTAINER_PREFIX=""
 
 while [[ $# -gt 0 ]]; do
+  if runtime_config_parse_common_arg "$1" "${2-}"; then
+    shift 2
+    continue
+  fi
   case "$1" in
     --node) NODE="$2"; shift 2 ;;
     --container) CONTAINER="$2"; shift 2 ;;
@@ -116,6 +130,7 @@ done
 for var in NODE CONTAINER TEST_MODE SERVED_MODEL_ID PORT TP WORK_DIR; do
   [[ -n "${!var}" ]] || { echo "缺少参数: ${var}" >&2; exit 2; }
 done
+resolve_runtime_config
 if [[ -z "$STATE" ]]; then
   STATE="${WORK_DIR}/state.json"
 fi

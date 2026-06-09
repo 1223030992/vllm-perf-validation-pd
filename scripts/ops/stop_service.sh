@@ -11,8 +11,7 @@ usage() {
 
 说明:
   本脚本只执行 docker stop 并验证端口释放，永远不会执行 docker rm。
-  如果传入的 state 是容器路径 /mnt/skilltest/...，脚本会自动转换为宿主机路径
-  /public/home/liuzhh8/skilltest/... 后再更新 state.json。
+  如果传入的 state 是容器路径 /mnt/skilltest/...，脚本会自动转换为宿主机路径后再更新 state.json。
 USAGE
 }
 
@@ -38,12 +37,24 @@ NODE=""
 CONTAINER=""
 PORT=""
 STATE=""
-SKILL_HOST_ROOT="${SKILL_HOST_ROOT:-/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single}"
-OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-/mnt/skilltest/vllm-perf-validation-single}"
-OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-/public/home/liuzhh8/skilltest/vllm-perf-validation-single}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/runtime_config.sh"
+SKILL_USER=""
+USER_ABBR=""
+HOME_ROOT=""
+HOST_HOME_ROOT=""
+SKILL_HOST_ROOT="${SKILL_HOST_ROOT:-}"
+OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-}"
+CONTAINER_PREFIX=""
 DRY_RUN="${DRY_RUN:-0}"
 
 while [[ $# -gt 0 ]]; do
+  if runtime_config_parse_common_arg "$1" "${2-}"; then
+    shift 2
+    continue
+  fi
   case "$1" in
     --node) NODE="$2"; shift 2 ;;
     --container) CONTAINER="$2"; shift 2 ;;
@@ -58,6 +69,7 @@ done
 [[ -n "$NODE" ]] || { echo "缺少参数: --node" >&2; exit 2; }
 [[ -n "$CONTAINER" ]] || { echo "缺少参数: --container" >&2; exit 2; }
 [[ -n "$PORT" ]] || { echo "缺少参数: --port" >&2; exit 2; }
+resolve_runtime_config
 
 state_host_path() {
   local state="$1"

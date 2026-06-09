@@ -8,10 +8,10 @@
 
 - 真实测试主流程必须优先使用 `scripts/ops/*.sh`。本文件中的命令只用于理解、排障和补充说明。
 - 单模型 `custom` 冒烟或回归任务优先使用绝对路径入口
-  `bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ...`，把 preflight、创建容器、
+  `bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ...`，把 preflight、创建容器、
   启动、等待、benchmark、报告、停止和最终报告收敛到一个稳定入口，减少 Claude Code 权限询问。
 - 不要使用 `cd /public/... && bash scripts/ops/run_single_task.sh ...`，该命令形态无法匹配推荐的 Claude Code allow 规则。
-- 不要使用 `SKILL_ROOT=...` 多行变量块拼接入口；正式命令必须直接以 `bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh` 开头。
+- 不要使用 `SKILL_ROOT=...` 多行变量块拼接入口；正式命令必须直接以 `bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh` 开头。
 - 不要使用 `DRY_RUN=1 bash ...` 或 `DRY_RUN=0 bash ...` 环境变量前缀；dry-run 必须使用脚本参数 `--dry-run`。
 - `run_single_task.sh` 已内置 preflight，正式单模型 custom 流程不要单独调用 `preflight_node.sh`。
 - ops 脚本失败时，应记录脚本名、参数和错误输出后停止流程，不要手写新的 SSH/Docker 长命令绕过。
@@ -21,7 +21,7 @@
 - stop/report 阶段失败时，只能用 `scripts/ops/recover_single_task.sh --state ...` 恢复，不要手写 SSH/Docker 回退。
 - SERVICE_TIMEOUT、SERVICE_STARTED、WAITING_READY 后继续执行时，只能用
   `scripts/ops/resume_single_task.sh --state ...` 恢复 wait/bench/report/stop/final report，不要手写 `curl`、`run_bench.sh` 或造 CSV。
-- 容器路径 `/mnt/skilltest/...` 与宿主机路径 `/public/home/liuzhh8/skilltest/...` 必须同时记录；容器停止后从宿主机路径读取产物。
+- 容器路径 `/mnt/skilltest/...` 与宿主机路径 `/public/home/<user>/skilltest/...` 必须同时记录；容器停止后从宿主机路径读取产物。
 
 ---
 
@@ -63,9 +63,9 @@ ssh <NODE_IP> "/opt/hyhal/bin/hy-smi 2>/dev/null || rocm-smi --showid 2>/dev/nul
 
 ### 容器命名规范
 
-**格式：** `lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>`
+**格式：** `<container_prefix>-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>`
 
-**示例：** `lzh-agent-test-0428-glm47int8-2540`
+**示例：** `<container_prefix>-0428-glm47int8-2540`
 
 MODEL_SHORT 规则：
 - GLM-4.7-W8A8 / GLM-4.7-Channel-INT8 → glm47int8
@@ -78,7 +78,7 @@ MODEL_SHORT 规则：
 新增模型不要手写 `MODEL_SHORT`。优先调用：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh ...
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh ...
 ```
 
 通用推导示例：
@@ -103,7 +103,7 @@ ssh <NODE_IP> "docker run -itd --name=<CONTAINER_NAME> \
   --ipc=host --group-add video \
   --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
   --ulimit stack=-1:-1 --ulimit memlock=-1:-1 \
-  -v /public/home/liuzhh8:/mnt \
+  -v /public/home/<user>:/mnt \
   -v /module/:/module:ro \
   -v /public/opendas/DL_DATA/llm-models/:/model:ro \
   -v /public4/share/:/model1:ro \
@@ -171,7 +171,7 @@ tail -120 \"\$LOG\" || true
 
 **示例：**
 ```
-/public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs/GLM-4.7-W8A8-serial-full-20260515-lzh-agent-test-0428-glm47int8-2540/
+/public/home/<user>/skilltest/vllm-perf-validation-single/work_dirs/GLM-4.7-W8A8-serial-full-20260515-<container_prefix>-0428-glm47int8-2540/
 ```
 
 **子目录结构：**
@@ -198,7 +198,7 @@ echo "WORK_DIR=${WORK_DIR}"
 '
 
 # 在宿主机创建工作路径（如果需要）
-ssh <NODE_IP> "mkdir -p /public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs/<MODEL>-<TEST_MODE>-<DATE>-<CONTAINER_NAME>/{logs,csvs/{full,pchit,engin,custom}}"
+ssh <NODE_IP> "mkdir -p /public/home/<user>/skilltest/vllm-perf-validation-single/work_dirs/<MODEL>-<TEST_MODE>-<DATE>-<CONTAINER_NAME>/{logs,csvs/{full,pchit,engin,custom}}"
 ```
 
 ### 环境变量传递
@@ -209,7 +209,7 @@ ssh <NODE_IP> "mkdir -p /public/home/liuzhh8/skilltest/vllm-perf-validation-sing
 | `TEST_MODE` | 测试模式（用于子目录） | `full`、`pchit`、`engin`、`custom` |
 | `LOG_DIR` | 日志目录 | `${WORK_DIR}/logs` |
 | `IMAGE_NAME` | 镜像名称（用于路径命名） | `25401bd053af` |
-| `CONTAINER_NAME` | 容器名称（用于路径命名） | `lzh-agent-test-0428-glm47int8-2540` |
+| `CONTAINER_NAME` | 容器名称（用于路径命名） | `<container_prefix>-0428-glm47int8-2540` |
 
 ---
 

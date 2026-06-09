@@ -96,7 +96,7 @@
           "bench_model_id": "/model/GLM-4.7-W8A8",
           "status": "PASS",
           "port": 9348,
-          "container_name": "lzh-agent-test-0515-glm47int8-2540",
+          "container_name": "<container_prefix>-0515-glm47int8-2540",
           "deployment": { "status": "PASS", "start_time": "...", "end_time": "..." },
           "test": { "mode": "full", "status": "PASS", "duration_seconds": 600 },
           "key_metrics": {

@@ -15,7 +15,15 @@ USAGE
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-/public/home/liuzhh8/skilltest/vllm-perf-validation-single}"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/runtime_config.sh"
+SKILL_USER=""
+USER_ABBR=""
+HOME_ROOT=""
+HOST_HOME_ROOT=""
+SKILL_HOST_ROOT=""
+OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-}"
+CONTAINER_PREFIX=""
 
 STATE=""
 NODE=""
@@ -25,6 +33,10 @@ REPORT_DIR=""
 RUN_ID=""
 
 while [[ $# -gt 0 ]]; do
+  if runtime_config_parse_common_arg "$1" "${2-}"; then
+    shift 2
+    continue
+  fi
   case "$1" in
     --state) STATE="$2"; shift 2 ;;
     --node) NODE="$2"; shift 2 ;;
@@ -38,6 +50,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$STATE" ]] || { echo "缺少参数: --state" >&2; exit 2; }
+resolve_runtime_config
 
 state_get() {
   local path="$1"
@@ -82,18 +95,32 @@ for var in NODE CONTAINER PORT CSV_HOST RUN_ID REPORT_DIR; do
 done
 
 echo "== recover_stop_service =="
-SKILL_HOST_ROOT="$SKILL_ROOT" bash "$SCRIPT_DIR/stop_service.sh" \
+SKILL_HOST_ROOT="$SKILL_HOST_ROOT" OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" bash "$SCRIPT_DIR/stop_service.sh" \
   --node "$NODE" \
   --container "$CONTAINER" \
   --port "$PORT" \
-  --state "$STATE"
+  --state "$STATE" \
+  --user "$SKILL_USER" \
+  --abbr "$USER_ABBR" \
+  --host-home-root "$HOST_HOME_ROOT" \
+  --skill-host-root "$SKILL_HOST_ROOT" \
+  --output-host-root "$OUTPUT_HOST_ROOT" \
+  --output-container-root "$OUTPUT_CONTAINER_ROOT" \
+  --container-prefix "$CONTAINER_PREFIX"
 
 echo "== recover_render_report =="
-python3 "$SCRIPT_DIR/render_report.py" \
+OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" python3 "$SCRIPT_DIR/render_report.py" \
   --run-id "$RUN_ID" \
   --state "$STATE" \
   --csv "$CSV_HOST" \
   --report-dir "$REPORT_DIR"
 
 echo "== recover_show_state =="
-bash "$SCRIPT_DIR/show_state.sh" --state "$STATE"
+bash "$SCRIPT_DIR/show_state.sh" --state "$STATE" \
+  --user "$SKILL_USER" \
+  --abbr "$USER_ABBR" \
+  --host-home-root "$HOST_HOME_ROOT" \
+  --skill-host-root "$SKILL_HOST_ROOT" \
+  --output-host-root "$OUTPUT_HOST_ROOT" \
+  --output-container-root "$OUTPUT_CONTAINER_ROOT" \
+  --container-prefix "$CONTAINER_PREFIX"

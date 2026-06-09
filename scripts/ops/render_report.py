@@ -10,11 +10,30 @@ from pathlib import Path
 from statistics import mean
 
 
+SKILL_ROOT = Path(__file__).resolve().parents[2]
+
+
+def infer_user_from_skill_root():
+    root = SKILL_ROOT.as_posix().rstrip("/")
+    for marker in ("/public/home/", "/public2/home/"):
+        if marker in root:
+            tail = root.split(marker, 1)[1]
+            user = tail.split("/", 1)[0]
+            if user:
+                return user
+    return os.environ.get("USER") or os.environ.get("LOGNAME") or "<user>"
+
+
+DEFAULT_OUTPUT_HOST_ROOT = "/public/home/{}/skilltest/vllm-perf-validation-single".format(
+    infer_user_from_skill_root()
+)
+
+
 OUTPUT_CONTAINER_ROOT = os.environ.get(
     "OUTPUT_CONTAINER_ROOT", "/mnt/skilltest/vllm-perf-validation-single"
 )
 OUTPUT_HOST_ROOT = os.environ.get(
-    "OUTPUT_HOST_ROOT", "/public/home/liuzhh8/skilltest/vllm-perf-validation-single"
+    "OUTPUT_HOST_ROOT", DEFAULT_OUTPUT_HOST_ROOT
 )
 
 

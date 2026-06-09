@@ -15,7 +15,7 @@ usage() {
 环境变量:
   SKILL_CONTAINER_ROOT=/mnt/.claude/skills/vllm-perf-validation-single
   OUTPUT_CONTAINER_ROOT=/mnt/skilltest/vllm-perf-validation-single
-  OUTPUT_HOST_ROOT=/public/home/liuzhh8/skilltest/vllm-perf-validation-single
+  OUTPUT_HOST_ROOT=/public/home/<user>/skilltest/vllm-perf-validation-single
   旧版 dry-run 环境变量仍兼容；正式调用请使用 --dry-run。
 
 说明:
@@ -88,14 +88,27 @@ TEST_MODE="custom"
 PORT=""
 TP=""
 GPU_RANGE="0,1,2,3,4,5,6,7"
-SKILL_CONTAINER_ROOT="${SKILL_CONTAINER_ROOT:-/mnt/.claude/skills/vllm-perf-validation-single}"
-OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-/mnt/skilltest/vllm-perf-validation-single}"
-OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-/public/home/liuzhh8/skilltest/vllm-perf-validation-single}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/runtime_config.sh"
+SKILL_USER=""
+USER_ABBR=""
+HOME_ROOT=""
+HOST_HOME_ROOT=""
+SKILL_HOST_ROOT=""
+OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-}"
+OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-}"
+CONTAINER_PREFIX=""
 DRY_RUN="${DRY_RUN:-0}"
 DATE_PART="$(date +%Y%m%d)"
 MMDD="$(date +%m%d)"
 
 while [[ $# -gt 0 ]]; do
+  if runtime_config_parse_common_arg "$1" "${2-}"; then
+    shift 2
+    continue
+  fi
   case "$1" in
     --node) NODE="$2"; shift 2 ;;
     --container) CONTAINER="$2"; shift 2 ;;
@@ -118,6 +131,7 @@ done
 for var in NODE CONTAINER MODEL_NAME MODEL_SHORT CONTAINER_MODEL_PATH SERVER_SCRIPT PORT TP; do
   [[ -n "${!var}" ]] || { echo "缺少参数: ${var}" >&2; exit 2; }
 done
+resolve_runtime_config
 
 WORK_DIR="${OUTPUT_CONTAINER_ROOT}/work_dirs/${MODEL_NAME}-${TEST_MODE}-${DATE_PART}-${CONTAINER}"
 LOG="${WORK_DIR}/logs/${MODEL_SHORT}-${MMDD}-vllm-server.log"

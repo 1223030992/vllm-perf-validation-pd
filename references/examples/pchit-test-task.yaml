@@ -7,9 +7,9 @@ task:
 mode: single
 
 paths:
-  skill_host_root: /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single
+  skill_host_root: /public/home/<user>/.claude/skills/vllm-perf-validation-single
   skill_container_root: /mnt/.claude/skills/vllm-perf-validation-single
-  output_host_root: /public/home/liuzhh8/skilltest/vllm-perf-validation-single
+  output_host_root: /public/home/<user>/skilltest/vllm-perf-validation-single
   output_container_root: /mnt/skilltest/vllm-perf-validation-single
 
 image:
@@ -22,7 +22,7 @@ node:
   gpu_count: 8
 
 container:
-  name_template: "lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>"
+  name_template: "<container_prefix>-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>"
 
 ops:
   preflight_script: scripts/ops/preflight_node.sh
@@ -61,6 +61,6 @@ test:
     concurrency_multiplier: 4
 
 output:
-  work_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs
-  report_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/reports
-  csv_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/csvs
+  work_dir: /public/home/<user>/skilltest/vllm-perf-validation-single/work_dirs
+  report_dir: /public/home/<user>/skilltest/vllm-perf-validation-single/reports
+  csv_dir: /public/home/<user>/skilltest/vllm-perf-validation-single/csvs

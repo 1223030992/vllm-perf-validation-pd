@@ -16,9 +16,6 @@ from pathlib import Path
 SKILL_ROOT = Path(__file__).resolve().parents[2]
 SKILL_NAME = "vllm-perf-validation-single"
 
-DEFAULT_USER = "liuzhh8"
-DEFAULT_OWNER = "liuzhihuan"
-DEFAULT_ABBR_PREFIX = "lzh-agent-test"
 DEFAULT_HOME_ROOTS = ["/public/home", "/public2/home"]
 DEFAULT_SKILL_CONTAINER_ROOT = "/mnt/.claude/skills/{}".format(SKILL_NAME)
 DEFAULT_OUTPUT_CONTAINER_ROOT = "/mnt/skilltest/{}".format(SKILL_NAME)
@@ -54,6 +51,9 @@ def parse_args():
     )
     parser.add_argument("--user", required=True, help="Target Linux username, for example zhangsan")
     parser.add_argument("--abbr", required=True, help="Short personal prefix, for example zs")
+    parser.add_argument("--from-user", help="Optional legacy username to replace in text files")
+    parser.add_argument("--from-container-prefix", help="Optional legacy container prefix to replace")
+    parser.add_argument("--from-owner", help="Optional legacy owner value to replace")
     parser.add_argument("--home-root", default="/public/home")
     parser.add_argument("--skill-host-root")
     parser.add_argument("--output-host-root")
@@ -86,6 +86,9 @@ def build_config(args):
         "skill_container_root": DEFAULT_SKILL_CONTAINER_ROOT,
         "output_container_root": DEFAULT_OUTPUT_CONTAINER_ROOT,
         "container_prefix": container_prefix,
+        "from_user": args.from_user,
+        "from_container_prefix": args.from_container_prefix,
+        "from_owner": args.from_owner,
     }
 
 
@@ -115,24 +118,25 @@ def read_text(path):
 
 def build_replacements(config):
     replacements = []
-    for root in DEFAULT_HOME_ROOTS:
-        old_home = "{}/{}".format(root, DEFAULT_USER)
-        old_skill = "{}/.claude/skills/{}".format(old_home, SKILL_NAME)
-        old_output = "{}/skilltest/{}".format(old_home, SKILL_NAME)
-        replacements.extend(
-            [
-                (old_skill, config["skill_host_root"]),
-                (old_output, config["output_host_root"]),
-                (old_home, config["host_home_root"]),
-            ]
+    if config.get("from_user"):
+        for root in DEFAULT_HOME_ROOTS:
+            old_home = "{}/{}".format(root, config["from_user"])
+            old_skill = "{}/.claude/skills/{}".format(old_home, SKILL_NAME)
+            old_output = "{}/skilltest/{}".format(old_home, SKILL_NAME)
+            replacements.extend(
+                [
+                    (old_skill, config["skill_host_root"]),
+                    (old_output, config["output_host_root"]),
+                    (old_home, config["host_home_root"]),
+                ]
+            )
+        replacements.append((config["from_user"], config["user"]))
+    if config.get("from_container_prefix"):
+        replacements.append((config["from_container_prefix"], config["container_prefix"]))
+    if config.get("from_owner"):
+        replacements.append(
+            ("owner: {}".format(config["from_owner"]), "owner: {}".format(config["user"]))
         )
-    replacements.extend(
-        [
-            (DEFAULT_ABBR_PREFIX, config["container_prefix"]),
-            (DEFAULT_USER, config["user"]),
-            ("owner: {}".format(DEFAULT_OWNER), "owner: {}".format(config["user"])),
-        ]
-    )
     return replacements
 
 

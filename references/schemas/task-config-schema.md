@@ -14,9 +14,9 @@ task:
 mode: single | serial | parallel
 
 paths:
-  skill_host_root: /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single
+  skill_host_root: /public/home/<user>/.claude/skills/vllm-perf-validation-single
   skill_container_root: /mnt/.claude/skills/vllm-perf-validation-single
-  output_host_root: /public/home/liuzhh8/skilltest/vllm-perf-validation-single
+  output_host_root: /public/home/<user>/skilltest/vllm-perf-validation-single
   output_container_root: /mnt/skilltest/vllm-perf-validation-single
 
 image:
@@ -29,7 +29,7 @@ node:
   dcu_type: DCU | BW1000 | BW1100
 
 container:
-  name_template: "lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>"
+  name_template: "<container_prefix>-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>"
 
 ops:
   preflight_script: scripts/ops/preflight_node.sh
@@ -63,9 +63,9 @@ test:
   params: {}
 
 output:
-  work_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs
-  report_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/reports
-  csv_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/csvs
+  work_dir: /public/home/<user>/skilltest/vllm-perf-validation-single/work_dirs
+  report_dir: /public/home/<user>/skilltest/vllm-perf-validation-single/reports
+  csv_dir: /public/home/<user>/skilltest/vllm-perf-validation-single/csvs
 ```
 
 ## 字段说明
@@ -189,7 +189,7 @@ bash scripts/client-scripts/run_perf_test-custom.sh "$SERVED_MODEL_ID" 9348 8
 ```bash
 bash scripts/ops/run_bench.sh \
   --node 10.16.1.9 \
-  --container lzh-agent-test-0520-glm47int8-2540 \
+  --container <container_prefix>-0520-glm47int8-2540 \
   --test-mode custom \
   --served-model-id "/model/GLM-4.7-W8A8" \
   --port 9348 \

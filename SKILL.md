@@ -11,7 +11,7 @@ description: >
 使用本 Skill 在单个 DCU/GPU 节点上执行可审计、可复现的 vLLM 性能验证。
 优先使用 `scripts/ops/` 中的低自由度脚本，不要手写很长的 SSH、Docker
 或 `vllm bench serve` 命令。单模型 `custom` 冒烟和回归任务必须使用
-`bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ...`
+`bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ... --user <user> --abbr <abbr>`
 作为正式自动化入口，把多次权限询问收敛为一次稳定脚本调用。不要先单独执行
 `preflight_node.sh`，因为主入口已经内置 preflight。不要使用
 `cd /public/... && bash scripts/ops/run_single_task.sh ...`、`DRY_RUN=1 bash ...`、
@@ -42,7 +42,7 @@ SKILL.md                         # 入口文件，只保留流程、硬规则和
 ```
 
 新增模型时，优先运行绝对路径入口
-`bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh ...`
+`bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh ... --user <user> --abbr <abbr>`
 生成 `references/profiles/<MODEL_SHORT>.yaml`、`references/examples/<MODEL_SHORT>-test-task.yaml`
 和 `references/conventions.md` 映射。不要手写 profile/example，不要手写容器名。
 `scripts/add-model.sh` 仅作为旧版兼容入口，现代参数会委托给 `register_model.sh`。
@@ -67,14 +67,14 @@ Skill 文件和运行产物使用不同根目录：
 
 | 用途 | 宿主机路径 | 容器内路径 |
 |---|---|---|
-| Skill 文件 | `/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single` | `/mnt/.claude/skills/vllm-perf-validation-single` |
-| 运行产物 | `/public/home/liuzhh8/skilltest/vllm-perf-validation-single` | `/mnt/skilltest/vllm-perf-validation-single` |
+| Skill 文件 | `/public/home/<user>/.claude/skills/vllm-perf-validation-single` | `/mnt/.claude/skills/vllm-perf-validation-single` |
+| 运行产物 | `/public/home/<user>/skilltest/vllm-perf-validation-single` | `/mnt/skilltest/vllm-perf-validation-single` |
 | 主模型目录 | `/public/opendas/DL_DATA/llm-models` | `/model` |
 | 备用模型目录 | `/public4/share` | `/model1` |
 | 第三模型目录 | `/public4/opendas/DL_DATA` | `/model2` |
 | DCU 工具 | `/opt/hyhal` | `/opt/hyhal` |
 
-创建容器时必须挂载 `/public/home/liuzhh8:/mnt`，并挂载上表中的模型目录和工具目录。
+创建容器时必须挂载 `/public/home/<user>:/mnt`，并挂载上表中的模型目录和工具目录。正式任务应显式传入 `--user <user> --abbr <abbr>`；主入口会由此推导 `HOST_HOME_ROOT`、`OUTPUT_HOST_ROOT` 和容器名前缀。
 
 ## 模型身份
 
@@ -111,7 +111,7 @@ Skill 文件和运行产物使用不同根目录：
 2. 读取 `references/conventions.md`，确定 `MODEL_SHORT`。
 3. 按需读取 `references/profiles/` 下的模型默认配置。
 4. 单模型 `custom` 任务必须调用绝对路径 `scripts/ops/run_single_task.sh`；该脚本会串联
-   `preflight_node.sh -> create_container.sh -> start_vllm_service.sh -> wait_vllm_ready.sh -> run_bench.sh -> render_report.py -> stop_service.sh -> render_report.py -> show_state.sh`。
+   `ensure_workspace.sh -> preflight_node.sh -> create_container.sh -> start_vllm_service.sh -> wait_vllm_ready.sh -> run_bench.sh -> render_report.py -> stop_service.sh -> render_report.py -> show_state.sh`。
 5. 如果用户明确要求诊断模式，才允许手动分步调用 `scripts/ops/*.sh`；不要手写 SSH/Docker/vLLM 长命令。
 6. benchmark 完成后先生成一次报告，再停止容器；stop 成功或失败后重新生成最终报告。
 
@@ -122,7 +122,7 @@ Skill 文件和运行产物使用不同根目录：
 - 执行真实测试时必须优先调用 `scripts/ops/` 中的状态机脚本。不要手写 `docker run`、`docker exec`
   长命令、readiness 轮询循环、client benchmark 命令或 `docker stop`。
 - 单模型 `custom` 任务优先使用绝对路径入口
-  `bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ... --assume-yes`；
+  `bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ... --user <user> --abbr <abbr> --assume-yes`；
   当用户已在 prompt 中明确授权时，不要再拆成多条 Bash 变量块分别执行。
 - dry-run 也必须使用主入口参数 `--dry-run`，不要使用环境变量前缀
   `DRY_RUN=1 bash ...` 或 `DRY_RUN=0 bash ...`，否则无法匹配 Claude Code allow 规则。
@@ -135,7 +135,7 @@ Skill 文件和运行产物使用不同根目录：
 - `scripts/client-scripts/*.sh` 是底层 client 适配脚本，不是主流程入口。性能测试应通过
   `scripts/ops/run_bench.sh` 执行，以保证 `served_model_id`、`state.json`、CSV 路径和失败原因被记录。
 - 所有输出路径应同时记录容器路径和宿主机路径。容器停止后，读取结果时应使用
-  `/public/home/liuzhh8/skilltest/vllm-perf-validation-single/...`，不要在宿主机直接读取 `/mnt/skilltest/...`。
+  `/public/home/<user>/skilltest/vllm-perf-validation-single/...`，不要在宿主机直接读取 `/mnt/skilltest/...`。
 
 ## Serial 状态机
 
@@ -199,10 +199,12 @@ Qwen、DeepSeek 等非 GLM 模型还必须显式提供 `--port`。脚本会自�
 示例：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
+  --user <user> \
+  --abbr <abbr> \
   --model-name GLM-5-W8A8 \
   --host-model-path /public/opendas/DL_DATA/llm-models/vllm-w8a8-models/GLM-5-W8A8 \
-  --server-script /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/server-scripts/run_glm5-w8a8-server.sh \
+  --server-script /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/server-scripts/run_glm5-w8a8-server.sh \
   --dry-run
 ```
 
@@ -227,7 +229,7 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 
 - `GLM-5-W8A8` 默认 readiness timeout 为 `3600` 秒，避免首次 `torch.compile` 和 CUDA graph capture 误判超时。
 - 如果 `run_single_task.sh` 已创建容器并启动服务，但在 `WAITING_READY` / `SERVICE_TIMEOUT` 前后中断，必须使用
-  `bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/resume_single_task.sh --state ...`
+  `bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/resume_single_task.sh --state ...`
   继续 `wait -> bench -> report -> stop -> final report -> show_state`。不要手写 `curl`、`run_bench.sh`、`docker stop` 或手造 CSV。
 - `recover_single_task.sh` 只用于 benchmark 已完成后的 stop/report 恢复；没有 CSV 的状态应使用 `resume_single_task.sh`。
 - 新增非 GLM 模型时，`register_model.sh` 不再默认 `TP=8`。必须显式传 `--tp`，或由 server script 中的 `-tp 2`、
@@ -245,7 +247,7 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 标准化入口：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/standardize_server_script.sh ...
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/standardize_server_script.sh ... --user <user> --abbr <abbr>
 ```
 
 标准化后的 server script 必须使用 `MODEL_PATH`、`PORT`、`TP_SIZE`、`GPU_RANGE` 变量，不要保留硬编码模型路径、端口、TP 或 GPU 列表。`register_model.sh` 发现未标准化脚本时会输出 `NEXT_STEP_STANDARDIZE_CMD`，正式注册默认失败；只有用户明确接受静态脚本时才传 `--allow-static-server-script`。

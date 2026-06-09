@@ -20,14 +20,19 @@ quote_sh() {
   printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/runtime_config.sh"
+
 normalize_list() {
   printf '%s' "$1" | tr ',' ' '
 }
 
 to_host_path() {
   local path="$1"
-  local output_container_root="${OUTPUT_CONTAINER_ROOT:-/mnt/skilltest/vllm-perf-validation-single}"
-  local output_host_root="${OUTPUT_HOST_ROOT:-/public/home/liuzhh8/skilltest/vllm-perf-validation-single}"
+  local output_container_root="$OUTPUT_CONTAINER_ROOT"
+  local output_host_root="$OUTPUT_HOST_ROOT"
   if [[ "$path" == "$output_container_root"* ]]; then
     printf '%s%s\n' "$output_host_root" "${path#$output_container_root}"
   else
@@ -37,8 +42,8 @@ to_host_path() {
 
 to_container_path() {
   local path="$1"
-  local output_container_root="${OUTPUT_CONTAINER_ROOT:-/mnt/skilltest/vllm-perf-validation-single}"
-  local output_host_root="${OUTPUT_HOST_ROOT:-/public/home/liuzhh8/skilltest/vllm-perf-validation-single}"
+  local output_container_root="$OUTPUT_CONTAINER_ROOT"
+  local output_host_root="$OUTPUT_HOST_ROOT"
   if [[ "$path" == "$output_host_root"* ]]; then
     printf '%s%s\n' "$output_container_root" "${path#$output_host_root}"
   else
@@ -78,9 +83,19 @@ PC_HIT_TOLERANCE=1
 PC_HIT_TIMEOUT=1800
 PC_HIT_INTERVAL=30
 DRY_RUN=0
-SKILL_CONTAINER_ROOT="${SKILL_CONTAINER_ROOT:-/mnt/.claude/skills/vllm-perf-validation-single}"
+SKILL_USER=""
+USER_ABBR=""
+HOME_ROOT=""
+HOST_HOME_ROOT=""
+SKILL_HOST_ROOT=""
+OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-}"
+CONTAINER_PREFIX=""
 
 while [[ $# -gt 0 ]]; do
+  if runtime_config_parse_common_arg "$1" "${2-}"; then
+    shift 2
+    continue
+  fi
   case "$1" in
     --node) NODE="$2"; shift 2 ;;
     --container) CONTAINER="$2"; shift 2 ;;
@@ -108,6 +123,7 @@ done
 for var in NODE CONTAINER SERVED_MODEL_ID PORT TP WORK_DIR STATE LOG_FILE INPUT_LEN OUTPUT_LEN PC_HIT_TARGET; do
   [[ -n "${!var}" ]] || { echo "missing required argument: ${var}" >&2; exit 2; }
 done
+resolve_runtime_config
 
 WORK_DIR="$(to_container_path "$WORK_DIR")"
 STATE="$(to_container_path "$STATE")"

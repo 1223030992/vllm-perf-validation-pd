@@ -20,6 +20,13 @@ Usage:
     --batches "1,2,3,4,5,6,7,8" [--pchit-benchmark-mode fixed]
 
 Common options:
+  --user USER
+  --abbr ABBR
+  --home-root PATH
+  --host-home-root PATH
+  --skill-host-root PATH
+  --output-host-root PATH
+  --output-container-root PATH
   --profile PROFILE_OR_SHORT
   --date MMDD
   --image-prefix PREFIX
@@ -221,10 +228,17 @@ TPOT_SLA_MS=50
 SLA_STAT="mean"
 PREFIX_WARMUP_REQUESTS=1
 CASE_WARMUP_REPEATS=0
+SKILL_USER=""
+USER_ABBR=""
+HOME_ROOT=""
+HOST_HOME_ROOT=""
+SKILL_HOST_ROOT=""
+OUTPUT_HOST_ROOT=""
+OUTPUT_CONTAINER_ROOT=""
 DATE_PART="$(date +%m%d)"
 IMAGE_PREFIX=""
 CONTAINER=""
-CONTAINER_PREFIX="${CONTAINER_PREFIX:-lzh-agent-test}"
+CONTAINER_PREFIX=""
 RUN_ID=""
 TIMEOUT=1800
 TIMEOUT_SET=0
@@ -235,18 +249,20 @@ ALLOW_IMAGE_PREFIX_FALLBACK=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/runtime_config.sh"
 OPS_VERSION="unknown"
 if [[ -f "$SCRIPT_DIR/version.sh" ]]; then
   # shellcheck source=/dev/null
   source "$SCRIPT_DIR/version.sh"
 fi
-SKILL_CONTAINER_ROOT="${SKILL_CONTAINER_ROOT:-/mnt/.claude/skills/vllm-perf-validation-single}"
-OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-/mnt/skilltest/vllm-perf-validation-single}"
-OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-/public/home/liuzhh8/skilltest/vllm-perf-validation-single}"
-HOST_HOME_ROOT="${HOST_HOME_ROOT:-/public/home/liuzhh8}"
 REPORT_DIR=""
 
 while [[ $# -gt 0 ]]; do
+  if runtime_config_parse_common_arg "$1" "${2-}"; then
+    shift 2
+    continue
+  fi
   case "$1" in
     --node) NODE="$2"; shift 2 ;;
     --image) IMAGE="$2"; shift 2 ;;
@@ -286,7 +302,6 @@ while [[ $# -gt 0 ]]; do
     --date) DATE_PART="$2"; shift 2 ;;
     --image-prefix) IMAGE_PREFIX="$2"; shift 2 ;;
     --container) CONTAINER="$2"; shift 2 ;;
-    --container-prefix) CONTAINER_PREFIX="$2"; shift 2 ;;
     --run-id) RUN_ID="$2"; shift 2 ;;
     --timeout) TIMEOUT="$2"; TIMEOUT_SET=1; shift 2 ;;
     --interval) INTERVAL="$2"; shift 2 ;;
@@ -298,6 +313,8 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
+
+resolve_runtime_config
 
 if [[ -n "$PROFILE" ]]; then
   PROFILE_PATH="$(resolve_profile_path "$PROFILE")"
@@ -380,15 +397,16 @@ echo "READY_TIMEOUT=$TIMEOUT"
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "--dry-run: no SSH/Docker/GPU operation will be executed."
   echo "Execution sequence:"
-  echo "  1. preflight_node.sh"
-  echo "  2. create_container.sh"
-  echo "  3. start_vllm_service.sh"
-  echo "  4. wait_vllm_ready.sh"
-  echo "  5. run_bench.sh"
-  echo "  6. render_report.py"
-  echo "  7. stop_service.sh"
-  echo "  8. render_report.py"
-  echo "  9. show_state.sh"
+  echo "  1. ensure_workspace.sh"
+  echo "  2. preflight_node.sh"
+  echo "  3. create_container.sh"
+  echo "  4. start_vllm_service.sh"
+  echo "  5. wait_vllm_ready.sh"
+  echo "  6. run_bench.sh"
+  echo "  7. render_report.py"
+  echo "  8. stop_service.sh"
+  echo "  9. render_report.py"
+  echo "  10. show_state.sh"
   cat <<EOF
 
 Key parameters:
@@ -428,12 +446,34 @@ Key parameters:
   PREFIX_WARMUP_REQUESTS=$PREFIX_WARMUP_REQUESTS
   CASE_WARMUP_REPEATS=$CASE_WARMUP_REPEATS
   TIMEOUT=$TIMEOUT
+  SKILL_USER=$SKILL_USER
+  USER_ABBR=$USER_ABBR
   HOST_HOME_ROOT=$HOST_HOME_ROOT
+  SKILL_HOST_ROOT=$SKILL_HOST_ROOT
+  SKILL_CONTAINER_ROOT=$SKILL_CONTAINER_ROOT
   OUTPUT_HOST_ROOT=$OUTPUT_HOST_ROOT
+  OUTPUT_CONTAINER_ROOT=$OUTPUT_CONTAINER_ROOT
   REPORT_DIR=$REPORT_DIR
 EOF
   exit 0
 fi
+
+ENSURE_WORKSPACE_CMD=(
+  bash "$SCRIPT_DIR/ensure_workspace.sh"
+  --node "$NODE"
+  --user "$SKILL_USER"
+  --abbr "$USER_ABBR"
+  --home-root "$HOME_ROOT"
+  --host-home-root "$HOST_HOME_ROOT"
+  --skill-host-root "$SKILL_HOST_ROOT"
+  --output-host-root "$OUTPUT_HOST_ROOT"
+  --output-container-root "$OUTPUT_CONTAINER_ROOT"
+  --container-prefix "$CONTAINER_PREFIX"
+)
+if [[ "$ASSUME_YES" == "1" ]]; then
+  ENSURE_WORKSPACE_CMD+=(--assume-yes)
+fi
+run_step_capture "ensure_workspace" "$TMP_DIR/workspace.out" "${ENSURE_WORKSPACE_CMD[@]}"
 
 run_step_capture "preflight" "$TMP_DIR/preflight.out" \
   bash "$SCRIPT_DIR/preflight_node.sh" \
@@ -450,6 +490,9 @@ run_step_capture "create_container" "$TMP_DIR/create.out" \
     --node "$NODE" \
     --image "$IMAGE" \
     --model-short "$MODEL_SHORT" \
+    --user "$SKILL_USER" \
+    --abbr "$USER_ABBR" \
+    --home-root "$HOME_ROOT" \
     --date "$DATE_PART" \
     --image-prefix "$IMAGE_PREFIX" \
     --container-prefix "$CONTAINER_PREFIX" \
@@ -463,6 +506,13 @@ run_step_capture "start_vllm_service" "$TMP_DIR/start.out" \
     bash "$SCRIPT_DIR/start_vllm_service.sh" \
       --node "$NODE" \
       --container "$CONTAINER" \
+      --user "$SKILL_USER" \
+      --abbr "$USER_ABBR" \
+      --home-root "$HOME_ROOT" \
+      --host-home-root "$HOST_HOME_ROOT" \
+      --skill-host-root "$SKILL_HOST_ROOT" \
+      --output-host-root "$OUTPUT_HOST_ROOT" \
+      --output-container-root "$OUTPUT_CONTAINER_ROOT" \
       --model-name "$MODEL_NAME" \
       --model-short "$MODEL_SHORT" \
       --container-model-path "$CONTAINER_MODEL_PATH" \
@@ -556,7 +606,14 @@ if [[ "$TEST_MODE" == "pchit" ]]; then
         --port "$PORT" \
         --tp "$TP" \
         --work-dir "$WORK_DIR_CONTAINER" \
-        --state "$STATE_CONTAINER"
+        --state "$STATE_CONTAINER" \
+        --user "$SKILL_USER" \
+        --abbr "$USER_ABBR" \
+        --host-home-root "$HOST_HOME_ROOT" \
+        --skill-host-root "$SKILL_HOST_ROOT" \
+        --output-host-root "$OUTPUT_HOST_ROOT" \
+        --output-container-root "$OUTPUT_CONTAINER_ROOT" \
+        --container-prefix "$CONTAINER_PREFIX"
 else
   run_step_capture "run_bench" "$TMP_DIR/bench.out" \
     env SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" \
@@ -577,7 +634,14 @@ else
         --port "$PORT" \
         --tp "$TP" \
         --work-dir "$WORK_DIR_CONTAINER" \
-        --state "$STATE_CONTAINER"
+        --state "$STATE_CONTAINER" \
+        --user "$SKILL_USER" \
+        --abbr "$USER_ABBR" \
+        --host-home-root "$HOST_HOME_ROOT" \
+        --skill-host-root "$SKILL_HOST_ROOT" \
+        --output-host-root "$OUTPUT_HOST_ROOT" \
+        --output-container-root "$OUTPUT_CONTAINER_ROOT" \
+        --container-prefix "$CONTAINER_PREFIX"
 fi
 
 CSV_HOST="$(extract_value CSV_HOST "$TMP_DIR/bench.out")"
@@ -586,7 +650,7 @@ CSV_HOST="$(extract_value CSV_HOST "$TMP_DIR/bench.out")"
 echo "== render_report_before_stop =="
 REPORT_BEFORE_RC=0
 set +e
-python3 "$SCRIPT_DIR/render_report.py" \
+OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" python3 "$SCRIPT_DIR/render_report.py" \
   --run-id "$RUN_ID" \
   --state "$STATE_HOST" \
   --csv "$CSV_HOST" \
@@ -600,14 +664,21 @@ fi
 echo "== stop_service =="
 STOP_RC=0
 set +e
-SKILL_HOST_ROOT="$SKILL_ROOT" \
+SKILL_HOST_ROOT="$SKILL_HOST_ROOT" \
   OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" \
   OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" \
   bash "$SCRIPT_DIR/stop_service.sh" \
     --node "$NODE" \
     --container "$CONTAINER" \
     --port "$PORT" \
-    --state "$STATE_HOST" 2>&1 | tee "$TMP_DIR/stop.out"
+    --state "$STATE_HOST" \
+    --user "$SKILL_USER" \
+    --abbr "$USER_ABBR" \
+    --host-home-root "$HOST_HOME_ROOT" \
+    --skill-host-root "$SKILL_HOST_ROOT" \
+    --output-host-root "$OUTPUT_HOST_ROOT" \
+    --output-container-root "$OUTPUT_CONTAINER_ROOT" \
+    --container-prefix "$CONTAINER_PREFIX" 2>&1 | tee "$TMP_DIR/stop.out"
 STOP_RC=${PIPESTATUS[0]}
 set -e
 
@@ -624,7 +695,7 @@ fi
 echo "== render_report_final =="
 REPORT_FINAL_RC=0
 set +e
-python3 "$SCRIPT_DIR/render_report.py" \
+OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" python3 "$SCRIPT_DIR/render_report.py" \
   --run-id "$RUN_ID" \
   --state "$STATE_HOST" \
   --csv "$CSV_HOST" \
@@ -636,7 +707,14 @@ if [[ "$REPORT_FINAL_RC" != "0" ]]; then
 fi
 
 echo "== show_state =="
-bash "$SCRIPT_DIR/show_state.sh" --state "$STATE_HOST" || true
+bash "$SCRIPT_DIR/show_state.sh" --state "$STATE_HOST" \
+  --user "$SKILL_USER" \
+  --abbr "$USER_ABBR" \
+  --host-home-root "$HOST_HOME_ROOT" \
+  --skill-host-root "$SKILL_HOST_ROOT" \
+  --output-host-root "$OUTPUT_HOST_ROOT" \
+  --output-container-root "$OUTPUT_CONTAINER_ROOT" \
+  --container-prefix "$CONTAINER_PREFIX" || true
 
 if [[ "$STOP_RC" != "0" ]]; then
   exit "$STOP_RC"

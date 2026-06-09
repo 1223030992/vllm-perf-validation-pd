@@ -9,8 +9,11 @@ Usage:
 Options:
   --date MMDD
   --image-prefix PREFIX
-  --container-prefix PREFIX   Default: $CONTAINER_PREFIX or lzh-agent-test
-  --host-home-root PATH       Default: $HOST_HOME_ROOT or /public/home/liuzhh8
+  --user USER
+  --abbr ABBR
+  --home-root PATH
+  --container-prefix PREFIX
+  --host-home-root PATH
   --name NAME                 Use an already generated container name
   --dry-run
   --allow-image-prefix-fallback
@@ -23,11 +26,21 @@ USAGE
 NODE=""
 IMAGE=""
 MODEL_SHORT=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/runtime_config.sh"
+SKILL_USER=""
+USER_ABBR=""
+HOME_ROOT=""
+HOST_HOME_ROOT=""
+SKILL_HOST_ROOT=""
+OUTPUT_HOST_ROOT=""
+OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-}"
 DATE_PART="$(date +%m%d)"
 IMAGE_PREFIX=""
 CONTAINER_NAME=""
-CONTAINER_PREFIX="${CONTAINER_PREFIX:-lzh-agent-test}"
-HOST_HOME_ROOT="${HOST_HOME_ROOT:-/public/home/liuzhh8}"
+CONTAINER_PREFIX=""
 DRY_RUN="${DRY_RUN:-0}"
 IMAGE_PREFIX_FALLBACK="${IMAGE_PREFIX_FALLBACK:-0}"
 
@@ -68,14 +81,16 @@ validate_prefix() {
 }
 
 while [[ $# -gt 0 ]]; do
+  if runtime_config_parse_common_arg "$1" "${2-}"; then
+    shift 2
+    continue
+  fi
   case "$1" in
     --node) NODE="$2"; shift 2 ;;
     --image) IMAGE="$2"; shift 2 ;;
     --model-short) MODEL_SHORT="$2"; shift 2 ;;
     --date) DATE_PART="$2"; shift 2 ;;
     --image-prefix) IMAGE_PREFIX="$2"; shift 2 ;;
-    --container-prefix) CONTAINER_PREFIX="$2"; shift 2 ;;
-    --host-home-root) HOST_HOME_ROOT="$2"; shift 2 ;;
     --name) CONTAINER_NAME="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --allow-image-prefix-fallback) IMAGE_PREFIX_FALLBACK=1; shift ;;
@@ -87,13 +102,8 @@ done
 [[ -n "$NODE" ]] || { echo "missing argument: --node" >&2; exit 2; }
 [[ -n "$IMAGE" ]] || { echo "missing argument: --image" >&2; exit 2; }
 [[ -n "$MODEL_SHORT" ]] || { echo "missing argument: --model-short" >&2; exit 2; }
+resolve_runtime_config
 validate_prefix "$CONTAINER_PREFIX"
-
-HOST_HOME_ROOT="${HOST_HOME_ROOT%/}"
-if [[ "$HOST_HOME_ROOT" != /* ]]; then
-  echo "host home root must be absolute: $HOST_HOME_ROOT" >&2
-  exit 2
-fi
 
 if [[ -z "$IMAGE_PREFIX" ]]; then
   if [[ "$DRY_RUN" == "1" ]]; then

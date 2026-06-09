@@ -21,9 +21,8 @@ USAGE
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-/mnt/skilltest/vllm-perf-validation-single}"
-OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-/public/home/liuzhh8/skilltest/vllm-perf-validation-single}"
-SKILL_CONTAINER_ROOT="${SKILL_CONTAINER_ROOT:-/mnt/.claude/skills/vllm-perf-validation-single}"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/runtime_config.sh"
 
 STATE=""
 NODE=""
@@ -34,6 +33,13 @@ INTERVAL=60
 REPORT_DIR=""
 RUN_ID=""
 DRY_RUN=0
+SKILL_USER=""
+USER_ABBR=""
+HOME_ROOT=""
+HOST_HOME_ROOT=""
+SKILL_HOST_ROOT=""
+OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-}"
+CONTAINER_PREFIX=""
 
 to_host_path() {
   local path="$1"
@@ -93,6 +99,10 @@ run_step_capture() {
 }
 
 while [[ $# -gt 0 ]]; do
+  if runtime_config_parse_common_arg "$1" "${2-}"; then
+    shift 2
+    continue
+  fi
   case "$1" in
     --state) STATE="$2"; shift 2 ;;
     --node) NODE="$2"; shift 2 ;;
@@ -109,6 +119,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$STATE" ]] || { echo "missing --state" >&2; exit 2; }
+resolve_runtime_config
 STATE_HOST="$(to_host_path "$STATE")"
 STATE_CONTAINER="$(to_container_path "$STATE")"
 [[ -f "$STATE_HOST" || "$DRY_RUN" == "1" ]] || { echo "state file not found: $STATE_HOST" >&2; exit 2; }
@@ -232,7 +243,14 @@ run_step_capture "resume_run_bench" "$TMP_DIR/bench.out" \
       --port "$PORT" \
       --tp "$TP" \
       --work-dir "$WORK_DIR_CONTAINER" \
-      --state "$STATE_CONTAINER"
+      --state "$STATE_CONTAINER" \
+      --user "$SKILL_USER" \
+      --abbr "$USER_ABBR" \
+      --host-home-root "$HOST_HOME_ROOT" \
+      --skill-host-root "$SKILL_HOST_ROOT" \
+      --output-host-root "$OUTPUT_HOST_ROOT" \
+      --output-container-root "$OUTPUT_CONTAINER_ROOT" \
+      --container-prefix "$CONTAINER_PREFIX"
 
 if [[ "$DRY_RUN" == "1" ]]; then
   CSV_HOST="<CSV_HOST_FROM_BENCH>"
@@ -242,28 +260,42 @@ fi
 [[ -n "$CSV_HOST" ]] || { echo "run_bench did not output CSV_HOST" >&2; exit 1; }
 
 run_step_capture "resume_render_report_before_stop" "$TMP_DIR/report_before.out" \
-  python3 "$SCRIPT_DIR/render_report.py" \
+  env OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" python3 "$SCRIPT_DIR/render_report.py" \
     --run-id "$RUN_ID" \
     --state "$STATE_HOST" \
     --csv "$CSV_HOST" \
     --report-dir "$REPORT_DIR"
 
 run_step_capture "resume_stop_service" "$TMP_DIR/stop.out" \
-  env SKILL_HOST_ROOT="$SKILL_ROOT" \
+  env SKILL_HOST_ROOT="$SKILL_HOST_ROOT" \
     OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" \
     OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" \
     bash "$SCRIPT_DIR/stop_service.sh" \
       --node "$NODE" \
       --container "$CONTAINER" \
       --port "$PORT" \
-      --state "$STATE_HOST"
+      --state "$STATE_HOST" \
+      --user "$SKILL_USER" \
+      --abbr "$USER_ABBR" \
+      --host-home-root "$HOST_HOME_ROOT" \
+      --skill-host-root "$SKILL_HOST_ROOT" \
+      --output-host-root "$OUTPUT_HOST_ROOT" \
+      --output-container-root "$OUTPUT_CONTAINER_ROOT" \
+      --container-prefix "$CONTAINER_PREFIX"
 
 run_step_capture "resume_render_report_final" "$TMP_DIR/report_final.out" \
-  python3 "$SCRIPT_DIR/render_report.py" \
+  env OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" python3 "$SCRIPT_DIR/render_report.py" \
     --run-id "$RUN_ID" \
     --state "$STATE_HOST" \
     --csv "$CSV_HOST" \
     --report-dir "$REPORT_DIR"
 
 run_step_capture "resume_show_state" "$TMP_DIR/show_state.out" \
-  bash "$SCRIPT_DIR/show_state.sh" --state "$STATE_HOST"
+  bash "$SCRIPT_DIR/show_state.sh" --state "$STATE_HOST" \
+    --user "$SKILL_USER" \
+    --abbr "$USER_ABBR" \
+    --host-home-root "$HOST_HOME_ROOT" \
+    --skill-host-root "$SKILL_HOST_ROOT" \
+    --output-host-root "$OUTPUT_HOST_ROOT" \
+    --output-container-root "$OUTPUT_CONTAINER_ROOT" \
+    --container-prefix "$CONTAINER_PREFIX"

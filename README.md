@@ -21,32 +21,13 @@ GitHub: <https://github.com/1223030992/vllm-perf-validation-single>
 - [11. 常见问题处理](#11-常见问题处理)
 - [12. 开发和验证](#12-开发和验证)
 
-## 1. 新用户一键迁移
+## 1. 新用户运行时配置
 
-新用户拿到 skill 后，建议先执行一次受控迁移，把仓库内默认用户路径和容器名前缀从示例用户切换为个人配置。该脚本只修改 skill 本地文本文件，不移动目录，不修改真实模型路径，不执行 SSH/Docker/GPU 操作。
+新用户拿到 skill 后，不需要先全仓替换用户名。正式注册和测试任务建议在主入口命令中直接传入 `--user <user> --abbr <abbr>`，运行时会自动推导宿主机 home、产物目录和容器名前缀，并在正式测试前检查/创建工作区。
 
-最小 dry-run：
+默认运行时规则：
 
-```bash
-bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/configure_skill_user.sh \
-  --user zhangsan \
-  --abbr zs \
-  --dry-run
-```
-
-确认替换计划无误后正式应用：
-
-```bash
-bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/configure_skill_user.sh \
-  --user zhangsan \
-  --abbr zs \
-  --apply \
-  --backup
-```
-
-默认迁移规则：
-
-| 配置项 | 迁移后默认值 |
+| 配置项 | 默认值 |
 | --- | --- |
 | skill 宿主机路径 | `/public/home/<user>/.claude/skills/vllm-perf-validation-single` |
 | 运行产物路径 | `/public/home/<user>/skilltest/vllm-perf-validation-single` |
@@ -54,28 +35,25 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/
 | 容器内产物路径 | `/mnt/skilltest/vllm-perf-validation-single` |
 | 容器名前缀 | `<abbr>-agent-test` |
 
-示例：`--user zhangsan --abbr zs` 后，容器名会从 `lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>` 变成 `zs-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>`。
+示例：`--user zhangsan --abbr zs` 后，容器名默认为 `zs-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>`。
 
-迁移脚本会输出 `settings.local.json` 的 allow 片段。至少需要放行：
+工作区检查规则：
 
-- `configure_skill_user.sh`
-- `standardize_server_script.sh`
-- `register_model.sh`
-- `run_single_task.sh`
-- `resume_single_task.sh`
-- `show_state.sh`
+- 已存在 `/public/home/<user>/skilltest/vllm-perf-validation-single`：不询问，直接继续。
+- 不存在且任务带 `--assume-yes`：自动创建 `work_dirs/reports/logs/csvs/tmp`。
+- 不存在且未授权 `--assume-yes`：只询问一次，确认后创建。
 
-自定义安装目录示例：
+`configure_skill_user.sh` 仍保留为可选辅助工具，只用于需要把 README、示例、规则文件中的模板文本批量替换为个人路径的场景。日常注册和测试不依赖它，推荐直接在主入口命令里传 `--user <user> --abbr <abbr>`。
+
+可选检查命令：
 
 ```bash
 bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/configure_skill_user.sh \
-  --user zhangsan \
-  --abbr zs \
-  --skill-host-root /public/home/zhangsan/.claude/skills/vllm-perf-validation-single \
-  --output-host-root /public/home/zhangsan/skilltest/vllm-perf-validation-single \
-  --container-prefix zs-agent-test \
-  --apply \
-  --backup
+  --from-user <old_user> \
+  --from-container-prefix <old_prefix> \
+  --user <user> \
+  --abbr <abbr> \
+  --dry-run
 ```
 
 ## 2. 快速使用方式
@@ -97,7 +75,7 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/
 
 ## 3. 路径替换
 
-README 示例默认使用用户 `liuzhh8`。其他用户使用前必须替换为自己的环境。
+README 的可执行模板统一使用 `<user>` 和 `<abbr>` 占位符。历史实测案例中的真实路径只用于追溯结果，不参与新用户运行配置。
 
 | 路径类型 | 示例 | 说明 |
 | --- | --- | --- |
@@ -225,7 +203,7 @@ vllm-perf-validation-single/
 
 ## 8. 给 Claude 的标准指令
 
-下面模板用于复制给 Claude。模板中的 `<user>`、节点、镜像、路径和端口要替换为实际值。
+下面模板用于复制给 Claude。模板中的 `<user>`、`<abbr>`、节点、镜像、路径和端口要替换为实际值。
 
 ### 8.1 现有模型 profile 模式
 
@@ -235,6 +213,10 @@ vllm-perf-validation-single/
 /vllm-perf-validation-single
 
 请只调用一条绝对路径主入口 run_single_task.sh，并使用 --profile <MODEL_SHORT> 自动读取已注册模型信息。
+
+用户配置：
+user: <user>
+abbr: <abbr>
 
 要求：
 1. 不要读取 profile 文件。
@@ -252,6 +234,8 @@ vllm-perf-validation-single/
 请为新增模型执行标准化注册流程，不执行真实 SSH/Docker/GPU 测试。
 
 模型信息：
+user: <user>
+abbr: <abbr>
 model_name: <MODEL_NAME>
 model_short: <MODEL_SHORT>
 host_model_path: <HOST_MODEL_PATH>
@@ -264,8 +248,8 @@ precision: <MODEL_PRECISION>
 
 要求：
 1. 只能调用绝对路径入口：
-   bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/standardize_server_script.sh ...
-   bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh ...
+   bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/standardize_server_script.sh ... --user <user> --abbr <abbr>
+   bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh ... --user <user> --abbr <abbr>
 2. 先执行 standardize_server_script.sh --dry-run，确认 diff。
 3. dry-run 无误后正式标准化 server script。
 4. 再执行 register_model.sh --dry-run。
@@ -285,6 +269,8 @@ precision: <MODEL_PRECISION>
 node: <NODE>
 image: <IMAGE>
 profile: <MODEL_SHORT>
+user: <user>
+abbr: <abbr>
 gpu_range: 0,1,2,3,4,5,6,7
 test_mode: custom
 input_lens: 512
@@ -296,7 +282,7 @@ timeout: 2400
 
 要求：
 1. 只允许调用一次主入口：
-   bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ...
+   bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ... --user <user> --abbr <abbr>
 2. 不要执行 --help。
 3. 不要读取 profile 文件，不要 ls/grep/cat/docker ps/tee/tail/python 解析 state。
 4. 不要单独 preflight。
@@ -316,6 +302,8 @@ timeout: 2400
 node: <NODE>
 image: <IMAGE>
 profile: <MODEL_SHORT>
+user: <user>
+abbr: <abbr>
 gpu_range: 0,1,2,3,4,5,6,7
 test_mode: pchit
 input_len: 32768
@@ -351,7 +339,7 @@ timeout: 3600
 
 硬性要求：
 1. 只允许调用一次主入口：
-   bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ...
+   bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ... --user <user> --abbr <abbr>
 2. 不允许执行 dry-run。
 3. 不允许执行 --help。
 4. 不允许 ls、grep、cat、docker ps、tee、tail、python 解析 state。
@@ -366,6 +354,8 @@ timeout: 3600
 node: 10.16.1.7
 image: 10.16.1.254:5000/jenkins/model_test_env/vllm:daily-20260428-1927
 profile: glm47int8
+user: <user>
+abbr: <abbr>
 gpu_range: 0,1,2,3,4,5,6,7
 test_mode: pchit
 input_len: 32768
@@ -385,7 +375,9 @@ timeout: 3600
 Claude 唯一应执行的命令形态：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh \
+  --user <user> \
+  --abbr <abbr> \
   --profile glm47int8 \
   --node 10.16.1.7 \
   --image 10.16.1.254:5000/jenkins/model_test_env/vllm:daily-20260428-1927 \

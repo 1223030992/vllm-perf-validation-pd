@@ -103,7 +103,7 @@ STATE=$WORK_DIR/state.json
 正式执行时必须使用下面这种命令形态，避免权限规则不匹配：
 
 ```text
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ...
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ...
 ```
 
 不要使用 `cd` 进入 Skill 目录后再调用相对路径脚本；不要在正式流程中先单独执行
@@ -113,7 +113,7 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 GLM-4.7-W8A8 最小冒烟示例：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh \
   --node 10.16.1.9 \
   --image "10.16.1.254:5000/jenkins/model_test_env/vllm:daily-20260428-1927" \
   --model-name GLM-4.7-W8A8 \
@@ -138,7 +138,7 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 GLM-5.1-Channel-INT8 最小冒烟示例应显式使用更长等待超时：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh \
   --node 10.16.1.9 \
   --image "10.16.1.254:5000/jenkins/model_test_env/vllm:daily-20260428-1927" \
   --model-name GLM-5.1-Channel-INT8 \
@@ -187,7 +187,7 @@ render_report.py
   `scripts/ops/recover_single_task.sh --state ...` 恢复入口，不要临时拼接 `ssh docker stop`。
 - benchmark 完成后先生成报告，再停止容器；stop 完成后重新生成最终报告。
 - 容器内涉及 `vllm` 或 `torch` 的命令必须通过 `bash -ic` 执行。普通 `bash -c` 在 DCU 镜像中可能缺少 DTK/HIP 环境。
-- 停止容器后读取产物时，应使用宿主机路径 `/public/home/liuzhh8/skilltest/...`，不要直接读容器路径 `/mnt/skilltest/...`。
+- 停止容器后读取产物时，应使用宿主机路径 `/public/home/<user>/skilltest/...`，不要直接读容器路径 `/mnt/skilltest/...`。
 
 ### 4.3 Claude Code 权限建议
 
@@ -197,14 +197,14 @@ render_report.py
 {
   "permissions": {
     "allow": [
-      "Read(/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/**)",
-      "Read(/public/home/liuzhh8/skilltest/vllm-perf-validation-single/**)",
-      "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh *)",
-      "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh *)",
-      "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/standardize_server_script.sh *)",
-      "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/show_state.sh *)",
-      "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/recover_single_task.sh *)",
-      "Bash(bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/resume_single_task.sh *)"
+      "Read(/public/home/<user>/.claude/skills/vllm-perf-validation-single/**)",
+      "Read(/public/home/<user>/skilltest/vllm-perf-validation-single/**)",
+      "Bash(bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh *)",
+      "Bash(bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh *)",
+      "Bash(bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/standardize_server_script.sh *)",
+      "Bash(bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/show_state.sh *)",
+      "Bash(bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/recover_single_task.sh *)",
+      "Bash(bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/resume_single_task.sh *)"
     ],
     "deny": [
       "Bash(*docker rm*)",
@@ -225,19 +225,19 @@ render_report.py
 使用参数形式 `--dry-run`，不要使用 `DRY_RUN=1` 前缀：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/preflight_node.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/preflight_node.sh \
   --node 10.16.1.9 \
   --image 10.16.1.254:5000/jenkins/model_test_env/vllm:daily-20260428-1927 \
   --ports "9348" \
   --host-model-paths "/public/opendas/DL_DATA/llm-models/glm4.7/GLM-4.7-W8A8" \
-  --container-names "lzh-agent-test-0520-glm47int8-2540" \
+  --container-names "<container_prefix>-0520-glm47int8-2540" \
   --dry-run
 ```
 
 ### 4.5 创建容器
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/create_container.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/create_container.sh \
   --node 10.16.1.9 \
   --image 10.16.1.254:5000/jenkins/model_test_env/vllm:daily-20260428-1927 \
   --model-short glm47int8 \
@@ -249,7 +249,7 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 真实创建前必须确认。执行成功后记录输出的：
 
 ```text
-CONTAINER_NAME=lzh-agent-test-0520-glm47int8-2540
+CONTAINER_NAME=<container_prefix>-0520-glm47int8-2540
 ```
 
 ### 4.6 启动服务
@@ -257,7 +257,7 @@ CONTAINER_NAME=lzh-agent-test-0520-glm47int8-2540
 ```bash
 bash scripts/ops/start_vllm_service.sh \
   --node 10.16.1.9 \
-  --container lzh-agent-test-0520-glm47int8-2540 \
+  --container <container_prefix>-0520-glm47int8-2540 \
   --model-name GLM-4.7-W8A8 \
   --model-short glm47int8 \
   --host-model-path /public/opendas/DL_DATA/llm-models/glm4.7/GLM-4.7-W8A8 \
@@ -286,7 +286,7 @@ STATE=...
 ```bash
 bash scripts/ops/wait_vllm_ready.sh \
   --node 10.16.1.9 \
-  --container lzh-agent-test-0520-glm47int8-2540 \
+  --container <container_prefix>-0520-glm47int8-2540 \
   --port 9348 \
   --log "$LOG" \
   --model-path /model/GLM-4.7-W8A8 \
@@ -315,7 +315,7 @@ export PERCENTILES="50,95,99"
 
 bash scripts/ops/run_bench.sh \
   --node 10.16.1.9 \
-  --container lzh-agent-test-0520-glm47int8-2540 \
+  --container <container_prefix>-0520-glm47int8-2540 \
   --test-mode custom \
   --served-model-id "$SERVED_MODEL_ID" \
   --port 9348 \
@@ -335,7 +335,7 @@ python scripts/ops/render_report.py \
   --run-id glm47-smoke-0520 \
   --state "$STATE" \
   --csv "$WORK_DIR/csvs/custom/all.csv" \
-  --report-dir /public/home/liuzhh8/skilltest/vllm-perf-validation-single/reports
+  --report-dir /public/home/<user>/skilltest/vllm-perf-validation-single/reports
 ```
 
 如果 `state.json` 中已经记录 `paths.csv_file`，可以不传 `--csv`。
@@ -345,7 +345,7 @@ python scripts/ops/render_report.py \
 ```bash
 bash scripts/ops/stop_service.sh \
   --node 10.16.1.9 \
-  --container lzh-agent-test-0520-glm47int8-2540 \
+  --container <container_prefix>-0520-glm47int8-2540 \
   --port 9348 \
   --state "$STATE"
 ```
@@ -361,7 +361,7 @@ python scripts/ops/render_report.py \
   --run-id glm47-smoke-0520 \
   --state "$STATE" \
   --csv "$WORK_DIR/csvs/custom/all.csv" \
-  --report-dir /public/home/liuzhh8/skilltest/vllm-perf-validation-single/reports
+  --report-dir /public/home/<user>/skilltest/vllm-perf-validation-single/reports
 ```
 
 ## 5. 使用实例
@@ -417,7 +417,7 @@ GPU_RANGE: 0,1,2,3,4,5,6,7
 测试组合：input_lens=512，output_len=32，concurrencies=1，num_prompts_mult=1，percentiles=50,95,99。
 
 请严格只调用绝对路径主入口：
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ...
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh ...
 
 不要单独执行 preflight_node.sh，不要生成多行 Bash 变量块，不要调用 python3 -c，不要手写 SSH/Docker/vLLM 命令。
 主入口会自动完成 preflight、创建容器、启动、等待 /v1/models、benchmark、停止容器和报告生成。
@@ -522,7 +522,7 @@ bash scripts/ops/run_bench.sh \
 适用于第一次接入新节点或新模型时：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/run_single_task.sh \
   --node 10.16.1.9 \
   --image 10.16.1.254:5000/jenkins/model_test_env/vllm:daily-20260428-1927 \
   --model-name GLM-4.7-W8A8 \
@@ -551,10 +551,10 @@ dry-run 只打印主流程和参数，不执行真实 SSH/Docker/GPU 变更。
 新增模型时优先使用本地注册入口，不要手写 profile/example，不要手写容器名：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
   --model-name GLM-5-W8A8 \
   --host-model-path /public/opendas/DL_DATA/llm-models/vllm-w8a8-models/GLM-5-W8A8 \
-  --server-script /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/server-scripts/run_glm5-w8a8-server.sh \
+  --server-script /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/server-scripts/run_glm5-w8a8-server.sh \
   --dry-run
 ```
 
@@ -571,10 +571,10 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 Qwen 和 DeepSeek 蒸馏版默认不分配端口，必须显式传 `--port`：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
   --model-name Qwen3.5-35B-W8A8 \
   --host-model-path /public/opendas/DL_DATA/llm-models/qwen/Qwen3.5-35B-W8A8 \
-  --server-script /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/server-scripts/run_qwen35b35int8-server.sh \
+  --server-script /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/server-scripts/run_qwen35b35int8-server.sh \
   --port 9360 \
   --dry-run
 ```
@@ -582,10 +582,10 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 DeepSeek 蒸馏版示例：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
   --model-name DeepSeek-R1-Distill-Qwen-32B-W8A8 \
   --host-model-path /public4/share/DeepSeek-R1-Distill-Qwen-32B-W8A8 \
-  --server-script /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/server-scripts/run_dsr1distillqwenb32int8-server.sh \
+  --server-script /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/server-scripts/run_dsr1distillqwenb32int8-server.sh \
   --port 9362 \
   --dry-run
 ```
@@ -620,7 +620,7 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 容器路径 `/mnt/skilltest/...` 只在容器内有效。容器停止后，应使用宿主机路径：
 
 ```text
-/public/home/liuzhh8/skilltest/vllm-perf-validation-single/...
+/public/home/<user>/skilltest/vllm-perf-validation-single/...
 ```
 
 `start_vllm_service.sh`、`run_bench.sh` 和 `stop_service.sh` 会输出 `*_HOST` 路径，后续汇总和报告生成优先使用这些路径。
@@ -695,8 +695,8 @@ all.csv 路径:
 - 如果主入口在 `SERVICE_TIMEOUT` 后退出，但服务随后就绪，继续流程必须调用：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/resume_single_task.sh \
-  --state /public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs/<RUN_DIR>/state.json
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/resume_single_task.sh \
+  --state /public/home/<user>/skilltest/vllm-perf-validation-single/work_dirs/<RUN_DIR>/state.json
 ```
 
 - 不要手写 `curl /v1/models`、不要直接调用 `run_bench.sh`、不要手造 CSV。
@@ -728,7 +728,7 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 标准化入口不连接 SSH、Docker 或 GPU，只处理本地 server script：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/standardize_server_script.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/standardize_server_script.sh \
   --model-name MiniMax-M2.5-W8A8 \
   --model-short minimaxm25int8 \
   --server-script scripts/server-scripts/run_minimax2.5-w8a8.sh \
@@ -742,7 +742,7 @@ bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops
 正式执行标准化后，再注册：
 
 ```bash
-bash /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
   --model-name MiniMax-M2.5-W8A8 \
   --model-short minimaxm25int8 \
   --host-model-path /public4/opendas/DL_DATA/llm-models/MiniMax-M2.5-W8A8 \

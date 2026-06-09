@@ -47,10 +47,10 @@
 ### 容器命名格式
 
 ```
-lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>
+<container_prefix>-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>
 
 示例：
-lzh-agent-test-0428-glm47int8-2540
+<container_prefix>-0428-glm47int8-2540
 
 说明：
 - lzh: 固定前缀
@@ -72,13 +72,13 @@ lzh-agent-test-0428-glm47int8-2540
 <MODEL>-<TEST_MODE>-<DATE>-<CONTAINER_NAME>/
 
 示例：
-GLM-4.7-W8A8-serial-full-20260515-lzh-agent-test-0428-glm47int8-2540/
+GLM-4.7-W8A8-serial-full-20260515-<container_prefix>-0428-glm47int8-2540/
 
 说明：
 - MODEL: GLM-4.7-W8A8
 - TEST_MODE: serial-full（执行模式-测试模式组合）
 - DATE: 20260515
-- CONTAINER_NAME: lzh-agent-test-0428-glm47int8-2540
+- CONTAINER_NAME: <container_prefix>-0428-glm47int8-2540
 ```
 
 ### 工作路径子目录结构
@@ -222,11 +222,11 @@ FINALIZE_REPORT
 
 ```bash
 # 1. 创建容器（可预创建）
-docker run -itd --name=lzh-agent-test-0515-glm47int8-2540 ... <IMAGE> bash
-docker run -itd --name=lzh-agent-test-0515-glm51int8-2540 ... <IMAGE> bash
+docker run -itd --name=<container_prefix>-0515-glm47int8-2540 ... <IMAGE> bash
+docker run -itd --name=<container_prefix>-0515-glm51int8-2540 ... <IMAGE> bash
 
 # 2. 启动 model_1 服务
-docker exec -w /mnt/.claude/skills/vllm-perf-validation-single lzh-agent-test-0515-glm47int8-2540 bash -ic '
+docker exec -w /mnt/.claude/skills/vllm-perf-validation-single <container_prefix>-0515-glm47int8-2540 bash -ic '
   export GPU_RANGE=0,1,2,3,4,5,6,7
   export TP=8
   export PORT=9348
@@ -241,7 +241,7 @@ curl -sS -m 20 -X POST "http://127.0.0.1:9348/v1/chat/completions" ...
 vllm bench serve --model /model/GLM-4.7-W8A8 --port 9348 ...
 
 # 5. 停止 model_1 服务（关键：不是删除容器）
-docker stop lzh-agent-test-0515-glm47int8-2540
+docker stop <container_prefix>-0515-glm47int8-2540
 
 # 6. 验证资源释放（关键步骤，在宿主机执行）
 PORT_HEX=$(printf '%04X' 9348)
@@ -249,7 +249,7 @@ ssh <NODE> "pgrep -af 'vllm serve' && exit 1 || true"  # 应返回成功
 ssh <NODE> "ss -tlnp | grep ':9348 ' || netstat -tlnp | grep ':9348 ' || cat /proc/net/tcp | grep '$PORT_HEX'"  # 应返回空
 
 # 7. 启动 model_2 服务
-docker exec -w /mnt/.claude/skills/vllm-perf-validation-single lzh-agent-test-0515-glm51int8-2540 bash -ic '
+docker exec -w /mnt/.claude/skills/vllm-perf-validation-single <container_prefix>-0515-glm51int8-2540 bash -ic '
   export GPU_RANGE=0,1,2,3,4,5,6,7
   export TP=8
   export PORT=9350
@@ -263,11 +263,11 @@ docker exec -w /mnt/.claude/skills/vllm-perf-validation-single lzh-agent-test-05
 
 ```bash
 # 错误：model_1 未停止就启动 model_2
-docker exec lzh-agent-test-0515-glm47int8-2540 ...  # model_1 仍在运行
-docker exec lzh-agent-test-0515-glm51int8-2540 ...  # 禁止同时运行
+docker exec <container_prefix>-0515-glm47int8-2540 ...  # model_1 仍在运行
+docker exec <container_prefix>-0515-glm51int8-2540 ...  # 禁止同时运行
 
 # 错误：用户未授权就删除容器
-docker rm lzh-agent-test-0515-glm47int8-2540  # 禁止，除非用户明确要求
+docker rm <container_prefix>-0515-glm47int8-2540  # 禁止，除非用户明确要求
 
 # 错误：跳过 VERIFY_RELEASE 直接启动下一个
 START_SERVICE(model_1)
@@ -293,8 +293,8 @@ Step 2: 前置检查
         - Docker 可用性验证
 
 Step 3: 创建两个容器
-        - 容器 A: lzh-agent-test-0515-<modelA>-<IMAGE_PREFIX>
-        - 容器 B: lzh-agent-test-0515-<modelB>-<IMAGE_PREFIX>
+        - 容器 A: <container_prefix>-0515-<modelA>-<IMAGE_PREFIX>
+        - 容器 B: <container_prefix>-0515-<modelB>-<IMAGE_PREFIX>
 
 Step 4: 并行启动两个 vLLM 服务
         - 容器 A: GPU_RANGE=0,1,2,3 TP=4 PORT=9348
@@ -318,7 +318,7 @@ Step 7: 停止服务 → 收集结果 → 聚合报告
 
 ```bash
 # 服务 A 启动（容器 A 内）
-docker exec lzh-agent-test-0515-<modelA>-<IMAGE_PREFIX> bash -ic '
+docker exec <container_prefix>-0515-<modelA>-<IMAGE_PREFIX> bash -ic '
   export GPU_RANGE=0,1,2,3
   export TP=4
   export PORT=9348
@@ -326,7 +326,7 @@ docker exec lzh-agent-test-0515-<modelA>-<IMAGE_PREFIX> bash -ic '
 '
 
 # 服务 B 启动（容器 B 内）
-docker exec lzh-agent-test-0515-<modelB>-<IMAGE_PREFIX> bash -ic '
+docker exec <container_prefix>-0515-<modelB>-<IMAGE_PREFIX> bash -ic '
   export GPU_RANGE=4,5,6,7
   export TP=4
   export PORT=9350

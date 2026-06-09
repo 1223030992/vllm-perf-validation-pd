@@ -18,11 +18,28 @@ PROFILES_DIR = SKILL_ROOT / "references" / "profiles"
 EXAMPLES_DIR = SKILL_ROOT / "references" / "examples"
 CONVENTIONS_FILE = SKILL_ROOT / "references" / "conventions.md"
 SERVER_SCRIPTS_DIR = SKILL_ROOT / "scripts" / "server-scripts"
+
+
+def infer_user_from_skill_root():
+    root = SKILL_ROOT.as_posix().rstrip("/")
+    for marker in ("/public/home/", "/public2/home/"):
+        if marker in root:
+            tail = root.split(marker, 1)[1]
+            user = tail.split("/", 1)[0]
+            if user:
+                return user
+    return os.environ.get("SKILL_USER") or os.environ.get("USER") or os.environ.get("LOGNAME") or "<user>"
+
+
+DEFAULT_USER = infer_user_from_skill_root()
+DEFAULT_ABBR = os.environ.get("USER_ABBR", DEFAULT_USER)
+DEFAULT_HOME_ROOT = os.environ.get("HOME_ROOT", "/public/home").rstrip("/")
+DEFAULT_HOST_HOME_ROOT = os.environ.get("HOST_HOME_ROOT", DEFAULT_HOME_ROOT + "/" + DEFAULT_USER).rstrip("/")
 DEFAULT_SKILL_HOST_ROOT = os.environ.get(
-    "SKILL_HOST_ROOT", "/public/home/liuzhh8/.claude/skills/vllm-perf-validation-single"
+    "SKILL_HOST_ROOT", DEFAULT_HOST_HOME_ROOT + "/.claude/skills/vllm-perf-validation-single"
 ).rstrip("/")
 DEFAULT_OUTPUT_HOST_ROOT = os.environ.get(
-    "OUTPUT_HOST_ROOT", "/public/home/liuzhh8/skilltest/vllm-perf-validation-single"
+    "OUTPUT_HOST_ROOT", DEFAULT_HOST_HOME_ROOT + "/skilltest/vllm-perf-validation-single"
 ).rstrip("/")
 DEFAULT_SKILL_CONTAINER_ROOT = os.environ.get(
     "SKILL_CONTAINER_ROOT", "/mnt/.claude/skills/vllm-perf-validation-single"
@@ -30,10 +47,8 @@ DEFAULT_SKILL_CONTAINER_ROOT = os.environ.get(
 DEFAULT_OUTPUT_CONTAINER_ROOT = os.environ.get(
     "OUTPUT_CONTAINER_ROOT", "/mnt/skilltest/vllm-perf-validation-single"
 ).rstrip("/")
-DEFAULT_CONTAINER_PREFIX = os.environ.get("CONTAINER_PREFIX", "lzh-agent-test")
-DEFAULT_OWNER = os.environ.get("SKILL_OWNER", "liuzhihuan")
-RUN_SINGLE_TASK = DEFAULT_SKILL_HOST_ROOT + "/scripts/ops/run_single_task.sh"
-STANDARDIZE_SERVER_SCRIPT = DEFAULT_SKILL_HOST_ROOT + "/scripts/ops/standardize_server_script.sh"
+DEFAULT_CONTAINER_PREFIX = os.environ.get("CONTAINER_PREFIX", DEFAULT_ABBR + "-agent-test")
+DEFAULT_OWNER = os.environ.get("SKILL_OWNER", DEFAULT_USER)
 
 
 def normalize_name(name):
@@ -382,12 +397,12 @@ output:
 """.format(
         short=args.model_short,
         model_name=args.model_name,
-        skill_host_root=DEFAULT_SKILL_HOST_ROOT,
+        skill_host_root=args.skill_host_root,
         skill_container_root=DEFAULT_SKILL_CONTAINER_ROOT,
-        output_host_root=DEFAULT_OUTPUT_HOST_ROOT,
-        output_container_root=DEFAULT_OUTPUT_CONTAINER_ROOT,
-        container_prefix=DEFAULT_CONTAINER_PREFIX,
-        owner=DEFAULT_OWNER,
+        output_host_root=args.output_host_root,
+        output_container_root=args.output_container_root,
+        container_prefix=args.container_prefix,
+        owner=args.user,
         host_model_path=args.host_model_path,
         container_model_path=args.container_model_path,
         service_script=service_script,
@@ -408,7 +423,11 @@ def print_command(name, command):
 def print_run_single_task(args, service_script):
     command = [
         "bash",
-        RUN_SINGLE_TASK,
+        args.run_single_task,
+        "--user",
+        args.user,
+        "--abbr",
+        args.abbr,
         "--node",
         "<NODE>",
         "--image",
@@ -423,6 +442,12 @@ def print_run_single_task(args, service_script):
         args.container_model_path,
         "--server-script",
         service_script,
+        "--output-host-root",
+        args.output_host_root,
+        "--output-container-root",
+        args.output_container_root,
+        "--container-prefix",
+        args.container_prefix,
         "--port",
         args.port,
         "--tp",
@@ -453,11 +478,21 @@ def print_run_single_task(args, service_script):
 def print_standardize_command(args, service_script):
     command = [
         "bash",
-        STANDARDIZE_SERVER_SCRIPT,
+        args.standardize_server_script,
+        "--user",
+        args.user,
+        "--abbr",
+        args.abbr,
         "--model-name",
         args.model_name,
         "--server-script",
         service_script,
+        "--output-host-root",
+        args.output_host_root,
+        "--output-container-root",
+        args.output_container_root,
+        "--container-prefix",
+        args.container_prefix,
         "--container-model-path",
         args.container_model_path,
         "--port",
@@ -514,6 +549,14 @@ def validate_server_script(script_text):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Register a model for vLLM perf validation")
+    parser.add_argument("--user")
+    parser.add_argument("--abbr")
+    parser.add_argument("--home-root", default=DEFAULT_HOME_ROOT)
+    parser.add_argument("--host-home-root")
+    parser.add_argument("--skill-host-root")
+    parser.add_argument("--output-host-root")
+    parser.add_argument("--output-container-root", default=DEFAULT_OUTPUT_CONTAINER_ROOT)
+    parser.add_argument("--container-prefix")
     parser.add_argument("--model-name", required=True)
     parser.add_argument("--host-model-path", required=True)
     parser.add_argument("--server-script", required=True)
@@ -530,7 +573,32 @@ def parse_args():
     return parser.parse_args()
 
 
+def apply_runtime_config(args):
+    args.user = args.user or DEFAULT_USER
+    if not args.user or args.user == "<user>":
+        raise SystemExit("missing runtime user; pass --user <linux_user>")
+    args.abbr = args.abbr or args.user
+    args.home_root = args.home_root.rstrip("/")
+    if args.home_root == "/public2/home":
+        args.home_root = "/public/home"
+    args.host_home_root = (args.host_home_root or args.home_root + "/" + args.user).rstrip("/")
+    args.skill_host_root = (
+        args.skill_host_root
+        or args.host_home_root + "/.claude/skills/vllm-perf-validation-single"
+    ).rstrip("/")
+    args.output_host_root = (
+        args.output_host_root
+        or args.host_home_root + "/skilltest/vllm-perf-validation-single"
+    ).rstrip("/")
+    args.output_container_root = args.output_container_root.rstrip("/")
+    args.container_prefix = args.container_prefix or args.abbr + "-agent-test"
+    args.run_single_task = args.skill_host_root + "/scripts/ops/run_single_task.sh"
+    args.standardize_server_script = args.skill_host_root + "/scripts/ops/standardize_server_script.sh"
+    return args
+
+
 def enrich_args(args, script_text, service_script):
+    args = apply_runtime_config(args)
     args.model_name = normalize_name(args.model_name)
     args.host_model_path = args.host_model_path.rstrip("/")
     args.precision, args.precision_defaulted = infer_precision(
@@ -603,6 +671,11 @@ def main():
     print("TP={}".format(args.tp))
     print("GPU_RANGE={}".format(args.gpu_range))
     print("SERVICE_SCRIPT={}".format(service_script))
+    print("USER={}".format(args.user))
+    print("ABBR={}".format(args.abbr))
+    print("SKILL_HOST_ROOT={}".format(args.skill_host_root))
+    print("OUTPUT_HOST_ROOT={}".format(args.output_host_root))
+    print("CONTAINER_PREFIX={}".format(args.container_prefix))
     print("COMPUTE_DTYPE={}".format(vllm_params.get("dtype", "")))
     print("KV_CACHE_DTYPE={}".format(vllm_params.get("kv_cache_dtype", "")))
     if getattr(args, "precision_defaulted", False):

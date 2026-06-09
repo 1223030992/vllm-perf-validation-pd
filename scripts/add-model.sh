@@ -472,15 +472,15 @@ generate_task_template() {
 task:
   name: vllm_perf_${MODEL_SHORT}
   run_id: auto
-  owner: liuzhihuan
+  owner: <user>
   description: "$MODEL_NAME 性能测试"
 
 mode: single
 
 paths:
-  skill_host_root: /public/home/liuzhh8/.claude/skills/vllm-perf-validation-single
+  skill_host_root: /public/home/<user>/.claude/skills/vllm-perf-validation-single
   skill_container_root: /mnt/.claude/skills/vllm-perf-validation-single
-  output_host_root: /public/home/liuzhh8/skilltest/vllm-perf-validation-single
+  output_host_root: /public/home/<user>/skilltest/vllm-perf-validation-single
   output_container_root: /mnt/skilltest/vllm-perf-validation-single
 
 image:
@@ -493,7 +493,7 @@ node:
   gpu_count: 8
 
 container:
-  name_template: "lzh-agent-test-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>"
+  name_template: "<container_prefix>-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>"
   create_options:
     - --privileged
     - --network=host
@@ -506,7 +506,7 @@ container:
     - --ulimit=stack=-1:-1
     - --ulimit=memlock=-1:-1
   volumes:
-    - /public/home/liuzhh8:/mnt
+    - /public/home/<user>:/mnt
     - /module:/module:ro
     - /public/opendas/DL_DATA/llm-models:/model:ro
     - /public4/share:/model1:ro
@@ -557,10 +557,10 @@ test:
     batch_seq: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
 
 output:
-  work_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/work_dirs
-  report_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/reports
-  log_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/logs
-  csv_dir: /public/home/liuzhh8/skilltest/vllm-perf-validation-single/csvs
+  work_dir: /public/home/<user>/skilltest/vllm-perf-validation-single/work_dirs
+  report_dir: /public/home/<user>/skilltest/vllm-perf-validation-single/reports
+  log_dir: /public/home/<user>/skilltest/vllm-perf-validation-single/logs
+  csv_dir: /public/home/<user>/skilltest/vllm-perf-validation-single/csvs
 EOF
 
     log_ok "task.yaml 模板已生成"
