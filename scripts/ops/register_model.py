@@ -134,6 +134,47 @@ def default_port(model_name):
     return None
 
 
+def collect_registered_ports():
+    ports = set([9348, 9349, 9350])
+    if PROFILES_DIR.exists():
+        for profile in PROFILES_DIR.glob("*.yaml"):
+            try:
+                text = read_text(profile)
+            except OSError:
+                continue
+            for match in re.finditer(r"(?m)^\s*default_port:\s*([0-9]+)\s*$", text):
+                port = int(match.group(1))
+                if 1 <= port <= 65535:
+                    ports.add(port)
+    if CONVENTIONS_FILE.exists():
+        text = read_text(CONVENTIONS_FILE)
+        for match in re.finditer(r"(?m)^\s*\|\s*[^|\n]+\s*\|\s*([0-9]+)\s*\|\s*$", text):
+            port = int(match.group(1))
+            if 1 <= port <= 65535:
+                ports.add(port)
+    return sorted(ports)
+
+
+def resolve_port(args):
+    used_ports = collect_registered_ports()
+    if args.port is not None:
+        args.port_source = "explicit"
+        args.used_ports = used_ports
+        return args
+
+    glm_port = default_port(args.model_name)
+    if glm_port is not None:
+        args.port = glm_port
+        args.port_source = "glm_default"
+        args.used_ports = used_ports
+        return args
+
+    args.port = (max(used_ports) + 1) if used_ports else 9351
+    args.port_source = "auto_next_available"
+    args.used_ports = used_ports
+    return args
+
+
 def host_to_container_path(host_path):
     path = host_path.rstrip("/")
     mappings = [
@@ -611,9 +652,7 @@ def enrich_args(args, script_text, service_script):
         args.container_model_path = host_to_container_path(args.host_model_path)
     if not args.container_model_path:
         raise SystemExit("cannot infer container path from host_model_path; pass --container-model-path")
-    args.port = args.port or default_port(args.model_name)
-    if args.port is None:
-        raise SystemExit("non-GLM models do not get an automatic port; pass --port")
+    args = resolve_port(args)
     if args.tp is None:
         if is_glm_model(args.model_name):
             args.tp = 8
@@ -668,6 +707,8 @@ def main():
     print("HOST_MODEL_PATH={}".format(args.host_model_path))
     print("CONTAINER_MODEL_PATH={}".format(args.container_model_path))
     print("PORT={}".format(args.port))
+    print("PORT_SOURCE={}".format(args.port_source))
+    print("USED_PORTS={}".format(",".join(str(port) for port in args.used_ports)))
     print("TP={}".format(args.tp))
     print("GPU_RANGE={}".format(args.gpu_range))
     print("SERVICE_SCRIPT={}".format(service_script))

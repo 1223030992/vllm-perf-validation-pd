@@ -123,7 +123,7 @@ server 启动脚本应支持以下标准环境变量：
 - GLM-4.7 系列：`9348`
 - GLM-5 系列：`9349`
 - GLM-5.1 系列：`9350`
-- Qwen、DeepSeek 等非 GLM 模型：必须显式传 `--port`
+- Qwen、DeepSeek 等非 GLM 模型：推荐显式传 `--port`；未传时按已注册端口最大值 + 1 自动分配
 
 ### 非 GLM TP/GPU 推导
 

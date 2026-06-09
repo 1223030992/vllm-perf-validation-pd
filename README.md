@@ -241,7 +241,7 @@ model_short: <MODEL_SHORT>
 host_model_path: <HOST_MODEL_PATH>
 container_model_path: <CONTAINER_MODEL_PATH>
 server_script: /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/server-scripts/<SCRIPT_NAME>
-port: <PORT>
+port: <PORT>（推荐显式提供；不提供时注册器会按已注册端口最大值 + 1 自动分配）
 tp: <TP>
 gpu_range: <GPU_RANGE>
 precision: <MODEL_PRECISION>

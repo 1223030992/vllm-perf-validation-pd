@@ -562,13 +562,13 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/
 
 - 推导 `MODEL_SHORT`，例如 `GLM-5-W8A8 -> glm5int8`
 - 推导容器路径，例如 `/public/opendas/DL_DATA/llm-models/... -> /model/...`
-- 推导 GLM 默认端口：GLM-4.7 `9348`，GLM-5 `9349`，GLM-5.1 `9350`
+- 推导端口：GLM 使用固定默认端口；非 GLM 未传 `--port` 时使用已注册端口最大值 + 1
 - 生成 `references/profiles/<MODEL_SHORT>.yaml`
 - 生成 `references/examples/<MODEL_SHORT>-test-task.yaml`
 - 更新 `references/conventions.md`
 - 输出可直接复制的绝对路径 `run_single_task.sh --dry-run` 命令
 
-Qwen 和 DeepSeek 蒸馏版默认不分配端口，必须显式传 `--port`：
+Qwen 和 DeepSeek 蒸馏版推荐显式传 `--port`；如果不传，注册器会根据已有 profile/conventions 端口自动分配下一个端口。显式传入的端口始终优先：
 
 ```bash
 bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/register_model.sh \
@@ -701,6 +701,7 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-single/scripts/ops/
 
 - 不要手写 `curl /v1/models`、不要直接调用 `run_bench.sh`、不要手造 CSV。
 - Qwen、DeepSeek 等非 GLM 模型注册时不再默认 TP8。必须显式传 `--tp`，或让注册器从脚本中的 `-tp 2` / `--tensor-parallel-size 2` / `export TP_SIZE=2` / `export TP=2` 推导。
+- Qwen、DeepSeek 等非 GLM 模型推荐显式传 `--port`；未传时注册器按已注册端口最大值 + 1 自动分配。该分配只避免注册配置冲突，真实节点端口是否空闲仍由正式测试 preflight 检查。
 - Qwen3.5-35B-W8A8 若脚本为 TP2，dry-run 预期输出 `TP=2`、`GPU_RANGE=0,1`。若脚本无法推导 TP 且未传 `--tp`，注册应失败。
 - 正式注册未参数化脚本默认失败；确认要保留静态脚本时才传 `--allow-static-server-script`。
 
