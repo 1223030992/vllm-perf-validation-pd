@@ -158,7 +158,7 @@ PY
 
 resolve_server_script_for_container() {
   local script="$1"
-  local marker="/.claude/skills/vllm-perf-validation-single/"
+  local marker="/.claude/skills/vllm-perf-validation-pd/"
   if [[ -z "$script" ]]; then
     return 0
   fi

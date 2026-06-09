@@ -36,16 +36,16 @@ DEFAULT_ABBR = os.environ.get("USER_ABBR", DEFAULT_USER)
 DEFAULT_HOME_ROOT = os.environ.get("HOME_ROOT", "/public/home").rstrip("/")
 DEFAULT_HOST_HOME_ROOT = os.environ.get("HOST_HOME_ROOT", DEFAULT_HOME_ROOT + "/" + DEFAULT_USER).rstrip("/")
 DEFAULT_SKILL_HOST_ROOT = os.environ.get(
-    "SKILL_HOST_ROOT", DEFAULT_HOST_HOME_ROOT + "/.claude/skills/vllm-perf-validation-single"
+    "SKILL_HOST_ROOT", DEFAULT_HOST_HOME_ROOT + "/.claude/skills/vllm-perf-validation-pd"
 ).rstrip("/")
 DEFAULT_OUTPUT_HOST_ROOT = os.environ.get(
-    "OUTPUT_HOST_ROOT", DEFAULT_HOST_HOME_ROOT + "/skilltest/vllm-perf-validation-single"
+    "OUTPUT_HOST_ROOT", DEFAULT_HOST_HOME_ROOT + "/skilltest/vllm-perf-validation-pd"
 ).rstrip("/")
 DEFAULT_SKILL_CONTAINER_ROOT = os.environ.get(
-    "SKILL_CONTAINER_ROOT", "/mnt/.claude/skills/vllm-perf-validation-single"
+    "SKILL_CONTAINER_ROOT", "/mnt/.claude/skills/vllm-perf-validation-pd"
 ).rstrip("/")
 DEFAULT_OUTPUT_CONTAINER_ROOT = os.environ.get(
-    "OUTPUT_CONTAINER_ROOT", "/mnt/skilltest/vllm-perf-validation-single"
+    "OUTPUT_CONTAINER_ROOT", "/mnt/skilltest/vllm-perf-validation-pd"
 ).rstrip("/")
 DEFAULT_CONTAINER_PREFIX = os.environ.get("CONTAINER_PREFIX", DEFAULT_ABBR + "-agent-test")
 DEFAULT_OWNER = os.environ.get("SKILL_OWNER", DEFAULT_USER)
@@ -625,11 +625,11 @@ def apply_runtime_config(args):
     args.host_home_root = (args.host_home_root or args.home_root + "/" + args.user).rstrip("/")
     args.skill_host_root = (
         args.skill_host_root
-        or args.host_home_root + "/.claude/skills/vllm-perf-validation-single"
+        or args.host_home_root + "/.claude/skills/vllm-perf-validation-pd"
     ).rstrip("/")
     args.output_host_root = (
         args.output_host_root
-        or args.host_home_root + "/skilltest/vllm-perf-validation-single"
+        or args.host_home_root + "/skilltest/vllm-perf-validation-pd"
     ).rstrip("/")
     args.output_container_root = args.output_container_root.rstrip("/")
     args.container_prefix = args.container_prefix or args.abbr + "-agent-test"
