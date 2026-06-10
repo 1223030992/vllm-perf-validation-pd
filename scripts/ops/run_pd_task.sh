@@ -5,7 +5,11 @@ usage() {
   cat <<'USAGE'
 Usage:
   run_pd_task.sh --config references/examples/glm47-vllm018-mooncake-1p1d-custom.yaml \
-    --user USER --abbr ABBR [--assume-yes] [--dry-run] [--image-prefix PREFIX]
+    --user USER --abbr ABBR [--assume-yes] [--dry-run] [--image-prefix PREFIX] \
+    [--prefill-node IP] [--prefill-service-ip IP] [--prefill-vllm-host-ip IP] \
+    [--decode-node IP] [--decode-service-ip IP] [--decode-vllm-host-ip IP] \
+    [--prefill-port PORT] [--decode-port PORT] [--prefill-transfer-port PORT] \
+    [--proxy-port PORT] [--network-ifname IFNAME] [--nccl-ib-hca HCA]
 USAGE
 }
 
@@ -20,6 +24,24 @@ run_step_capture() {
     printf '\n'
   fi
   "$@" 2>&1 | tee "$outfile"
+}
+cleanup_on_error() {
+  local rc="$1"
+  trap - ERR
+  set +e
+  echo "PD_TASK_FAILED_RC=$rc" >&2
+  if [[ "${DECODE_CONTAINER_CREATED:-0}" == "1" ]]; then
+    echo "== cleanup_stop_decode =="
+    bash "$SCRIPT_DIR/stop_service.sh" --node "$DECODE_NODE" --container "$DECODE_CONTAINER" --port "$DECODE_PORT" --state "$STATE_HOST" "${COMMON_ARGS[@]}" "${DRY_ARGS[@]}" || true
+  fi
+  if [[ "${PREFILL_CONTAINER_CREATED:-0}" == "1" ]]; then
+    echo "== cleanup_stop_prefill =="
+    bash "$SCRIPT_DIR/stop_service.sh" --node "$PREFILL_NODE" --container "$PREFILL_CONTAINER" --port "$PREFILL_PORT" --state "$STATE_HOST" "${COMMON_ARGS[@]}" "${DRY_ARGS[@]}" || true
+  fi
+  if [[ "${DRY_RUN:-0}" != "1" && -n "${STATE_HOST:-}" && -n "${CSV_HOST:-}" ]]; then
+    OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" python3 "$SCRIPT_DIR/render_report.py" --run-id "$RUN_ID" --state "$STATE_HOST" --csv "$CSV_HOST" --report-dir "$REPORT_DIR" || true
+  fi
+  exit "$rc"
 }
 inspect_image_prefix() {
   local node="$1" image="$2" image_id
@@ -40,6 +62,9 @@ to_host_path() {
 }
 
 CONFIG=""; ASSUME_YES=0; DRY_RUN=0; IMAGE_PREFIX=""; DATE_PART="$(date +%m%d)"; RUN_ID=""
+PREFILL_NODE_ARG=""; PREFILL_SERVICE_IP_ARG=""; PREFILL_VLLM_HOST_IP_ARG=""; PREFILL_PORT_ARG=""; PREFILL_TRANSFER_PORT_ARG=""
+DECODE_NODE_ARG=""; DECODE_SERVICE_IP_ARG=""; DECODE_VLLM_HOST_IP_ARG=""; DECODE_PORT_ARG=""
+PROXY_PORT_ARG=""; NETWORK_IFNAME_ARG=""; NCCL_IB_HCA_ARG=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/runtime_config.sh"
@@ -51,6 +76,18 @@ while [[ $# -gt 0 ]]; do
     --date) DATE_PART="$2"; shift 2 ;;
     --run-id) RUN_ID="$2"; shift 2 ;;
     --image-prefix) IMAGE_PREFIX="$2"; shift 2 ;;
+    --prefill-node) PREFILL_NODE_ARG="$2"; shift 2 ;;
+    --prefill-service-ip) PREFILL_SERVICE_IP_ARG="$2"; shift 2 ;;
+    --prefill-vllm-host-ip) PREFILL_VLLM_HOST_IP_ARG="$2"; shift 2 ;;
+    --prefill-port) PREFILL_PORT_ARG="$2"; shift 2 ;;
+    --prefill-transfer-port) PREFILL_TRANSFER_PORT_ARG="$2"; shift 2 ;;
+    --decode-node) DECODE_NODE_ARG="$2"; shift 2 ;;
+    --decode-service-ip) DECODE_SERVICE_IP_ARG="$2"; shift 2 ;;
+    --decode-vllm-host-ip) DECODE_VLLM_HOST_IP_ARG="$2"; shift 2 ;;
+    --decode-port) DECODE_PORT_ARG="$2"; shift 2 ;;
+    --proxy-port) PROXY_PORT_ARG="$2"; shift 2 ;;
+    --network-ifname) NETWORK_IFNAME_ARG="$2"; shift 2 ;;
+    --nccl-ib-hca) NCCL_IB_HCA_ARG="$2"; shift 2 ;;
     --assume-yes) ASSUME_YES=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --help) usage; exit 0 ;;
@@ -72,30 +109,35 @@ MODEL_NAME="${MODEL_NAME:-}"
 MODEL_SHORT="${MODEL_MODEL_SHORT:-${MODEL_SHORT:-}}"
 HOST_MODEL_PATH="${MODEL_HOST_MODEL_PATH:-}"
 CONTAINER_MODEL_PATH="${MODEL_CONTAINER_MODEL_PATH:-}"
-PREFILL_NODE="${PD_ROLES_PREFILL_NODE:-}"
-PREFILL_SERVICE_IP="${PD_ROLES_PREFILL_SERVICE_IP:-$PREFILL_NODE}"
-PREFILL_VLLM_HOST_IP="${PD_ROLES_PREFILL_VLLM_HOST_IP:-$PREFILL_NODE}"
-PREFILL_PORT="${PD_ROLES_PREFILL_PORT:-9348}"
-PREFILL_TRANSFER_PORT="${PD_ROLES_PREFILL_TRANSFER_PORT:-8998}"
-DECODE_NODE="${PD_ROLES_DECODE_NODE:-}"
-DECODE_SERVICE_IP="${PD_ROLES_DECODE_SERVICE_IP:-$DECODE_NODE}"
-DECODE_VLLM_HOST_IP="${PD_ROLES_DECODE_VLLM_HOST_IP:-$DECODE_NODE}"
-DECODE_PORT="${PD_ROLES_DECODE_PORT:-9349}"
+PREFILL_NODE="${PREFILL_NODE_ARG:-${PD_ROLES_PREFILL_NODE:-}}"
+PREFILL_SERVICE_IP="${PREFILL_SERVICE_IP_ARG:-${PD_ROLES_PREFILL_SERVICE_IP:-$PREFILL_NODE}}"
+PREFILL_VLLM_HOST_IP="${PREFILL_VLLM_HOST_IP_ARG:-${PD_ROLES_PREFILL_VLLM_HOST_IP:-$PREFILL_SERVICE_IP}}"
+PREFILL_PORT="${PREFILL_PORT_ARG:-${PD_ROLES_PREFILL_PORT:-9348}}"
+PREFILL_TRANSFER_PORT="${PREFILL_TRANSFER_PORT_ARG:-${PD_ROLES_PREFILL_TRANSFER_PORT:-8998}}"
+DECODE_NODE="${DECODE_NODE_ARG:-${PD_ROLES_DECODE_NODE:-}}"
+DECODE_SERVICE_IP="${DECODE_SERVICE_IP_ARG:-${PD_ROLES_DECODE_SERVICE_IP:-$DECODE_NODE}}"
+DECODE_VLLM_HOST_IP="${DECODE_VLLM_HOST_IP_ARG:-${PD_ROLES_DECODE_VLLM_HOST_IP:-$DECODE_SERVICE_IP}}"
+DECODE_PORT="${DECODE_PORT_ARG:-${PD_ROLES_DECODE_PORT:-9349}}"
 PROXY_ROLE="${PD_PROXY_NODE_ROLE:-prefill}"
-PROXY_PORT="${PD_PROXY_PORT:-8000}"
-NETWORK_IFNAME="${PD_NETWORK_IFNAME:-}"
-NCCL_IB_HCA="${PD_NETWORK_NCCL_IB_HCA:-}"
+PROXY_PORT="${PROXY_PORT_ARG:-${PD_PROXY_PORT:-8000}}"
+NETWORK_IFNAME="${NETWORK_IFNAME_ARG:-${PD_NETWORK_IFNAME:-}}"
+NCCL_IB_HCA="${NCCL_IB_HCA_ARG:-${PD_NETWORK_NCCL_IB_HCA:-}}"
 MOONCAKE_PROXY_SCRIPT="${PD_MOONCAKE_PROXY_SCRIPT:-mooncake/examples/online_serving/disaggregated_serving/mooncake_connector/mooncake_connector_proxy.py}"
 TP="${PD_SERVICE_DEFAULTS_TP:-8}"
 GPU_RANGE="${PD_SERVICE_DEFAULTS_GPU_RANGE:-0,1,2,3,4,5,6,7}"
 QUANTIZATION="${PD_SERVICE_DEFAULTS_QUANTIZATION:-slimquant_marlin}"
 DTYPE="${PD_SERVICE_DEFAULTS_DTYPE:-bfloat16}"
 MAX_NUM_BATCHED_TOKENS="${PD_SERVICE_DEFAULTS_MAX_NUM_BATCHED_TOKENS:-16384}"
-MAX_NUM_SEQS="${PD_SERVICE_DEFAULTS_MAX_NUM_SEQS:-256}"
-GPU_MEMORY_UTILIZATION="${PD_SERVICE_DEFAULTS_GPU_MEMORY_UTILIZATION:-0.9}"
-MAX_MODEL_LEN="${PD_SERVICE_DEFAULTS_MAX_MODEL_LEN:-40960}"
-SPECULATIVE_CONFIG="${PD_SERVICE_DEFAULTS_SPECULATIVE_CONFIG:-{\"method\":\"mtp\",\"num_speculative_tokens\":2,\"quantization\":\"slimquant_marlin\"}}"
-COMPILATION_CONFIG="${PD_SERVICE_DEFAULTS_COMPILATION_CONFIG:-{\"cudagraph_mode\":\"PIECEWISE\"}}"
+MAX_NUM_SEQS="${PD_SERVICE_DEFAULTS_MAX_NUM_SEQS:-}"
+GPU_MEMORY_UTILIZATION="${PD_SERVICE_DEFAULTS_GPU_MEMORY_UTILIZATION:-}"
+MAX_MODEL_LEN="${PD_SERVICE_DEFAULTS_MAX_MODEL_LEN:-}"
+DEFAULT_SPECULATIVE_CONFIG='{"method": "mtp", "num_speculative_tokens": 2, "quantization": "slimquant_marlin"}'
+DEFAULT_COMPILATION_CONFIG='{"cudagraph_mode": "PIECEWISE"}'
+SPECULATIVE_CONFIG="${PD_SERVICE_DEFAULTS_SPECULATIVE_CONFIG:-$DEFAULT_SPECULATIVE_CONFIG}"
+COMPILATION_CONFIG="${PD_SERVICE_DEFAULTS_COMPILATION_CONFIG:-$DEFAULT_COMPILATION_CONFIG}"
+EXTRA_ARGS="${PD_SERVICE_DEFAULTS_EXTRA_ARGS:-}"
+PREFILL_EXTRA_ARGS="$(printf '%s %s' "$EXTRA_ARGS" "${PD_SERVICE_DEFAULTS_PREFILL_EXTRA_ARGS:-}" | xargs)"
+DECODE_EXTRA_ARGS="$(printf '%s %s' "$EXTRA_ARGS" "${PD_SERVICE_DEFAULTS_DECODE_EXTRA_ARGS:-}" | xargs)"
 
 for var in IMAGE MODEL_NAME MODEL_SHORT HOST_MODEL_PATH CONTAINER_MODEL_PATH PREFILL_NODE DECODE_NODE NETWORK_IFNAME; do
   [[ -n "${!var}" ]] || { echo "missing required config value: $var" >&2; exit 2; }
@@ -118,9 +160,12 @@ STATE_CONTAINER="${WORK_DIR_CONTAINER}/state.json"
 STATE_HOST="$(to_host_path "$STATE_CONTAINER")"
 REPORT_DIR="${OUTPUT_HOST_ROOT}/reports"
 TMP_DIR="$(mktemp -d)"; trap 'rm -rf "$TMP_DIR"' EXIT
+PREFILL_CONTAINER_CREATED=0
+DECODE_CONTAINER_CREATED=0
 DRY_ARGS=(); [[ "$DRY_RUN" == "1" ]] && DRY_ARGS=(--dry-run)
 ASSUME_ARGS=(); [[ "$ASSUME_YES" == "1" ]] && ASSUME_ARGS=(--assume-yes)
 COMMON_ARGS=(--user "$SKILL_USER" --abbr "$USER_ABBR" --home-root "$HOME_ROOT" --host-home-root "$HOST_HOME_ROOT" --skill-host-root "$SKILL_HOST_ROOT" --output-host-root "$OUTPUT_HOST_ROOT" --output-container-root "$OUTPUT_CONTAINER_ROOT" --container-prefix "$CONTAINER_PREFIX")
+CSV_HOST="${WORK_DIR_HOST}/csvs/${TEST_MODE}/all.csv"
 
 cat <<EOF
 TASK_RUN_ID=$RUN_ID
@@ -135,12 +180,16 @@ WORK_DIR_HOST=$WORK_DIR_HOST
 STATE_HOST=$STATE_HOST
 EOF
 
+trap 'cleanup_on_error "$?"' ERR
+
 run_step_capture preflight_pd "$TMP_DIR/preflight.out" bash "$SCRIPT_DIR/preflight_pd_node.sh" --prefill-node "$PREFILL_NODE" --decode-node "$DECODE_NODE" --proxy-node "$PROXY_NODE" --image "$IMAGE" --prefill-port "$PREFILL_PORT" --decode-port "$DECODE_PORT" --proxy-port "$PROXY_PORT" --host-model-path "$HOST_MODEL_PATH" --network-ifname "$NETWORK_IFNAME" --nccl-ib-hca "$NCCL_IB_HCA" --skill-host-root "$SKILL_HOST_ROOT" --mooncake-proxy-script "$MOONCAKE_PROXY_SCRIPT" "${DRY_ARGS[@]}"
 run_step_capture ensure_workspace "$TMP_DIR/workspace.out" bash "$SCRIPT_DIR/ensure_workspace.sh" --node "$PREFILL_NODE" "${COMMON_ARGS[@]}" "${ASSUME_ARGS[@]}" "${DRY_ARGS[@]}"
 run_step_capture create_prefill_container "$TMP_DIR/create_prefill.out" bash "$SCRIPT_DIR/create_container.sh" --node "$PREFILL_NODE" --image "$IMAGE" --model-short "${MODEL_SHORT}p" --name "$PREFILL_CONTAINER" --date "$DATE_PART" --image-prefix "$IMAGE_PREFIX" "${COMMON_ARGS[@]}" "${DRY_ARGS[@]}"
+PREFILL_CONTAINER_CREATED=1
 run_step_capture create_decode_container "$TMP_DIR/create_decode.out" bash "$SCRIPT_DIR/create_container.sh" --node "$DECODE_NODE" --image "$IMAGE" --model-short "${MODEL_SHORT}d" --name "$DECODE_CONTAINER" --date "$DATE_PART" --image-prefix "$IMAGE_PREFIX" "${COMMON_ARGS[@]}" "${DRY_ARGS[@]}"
-run_step_capture start_prefill "$TMP_DIR/start_prefill.out" env SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" bash "$SCRIPT_DIR/start_pd_role_service.sh" --role prefill --node "$PREFILL_NODE" --container "$PREFILL_CONTAINER" --model-name "$MODEL_NAME" --model-short "$MODEL_SHORT" --container-model-path "$CONTAINER_MODEL_PATH" --host-model-path "$HOST_MODEL_PATH" --port "$PREFILL_PORT" --tp "$TP" --gpu-range "$GPU_RANGE" --work-dir "$WORK_DIR_CONTAINER" --state "$STATE_CONTAINER" --vllm-host-ip "$PREFILL_VLLM_HOST_IP" --network-ifname "$NETWORK_IFNAME" --nccl-ib-hca "$NCCL_IB_HCA" --quantization "$QUANTIZATION" --dtype "$DTYPE" --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" --max-num-seqs "$MAX_NUM_SEQS" --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" --max-model-len "$MAX_MODEL_LEN" --speculative-config "$SPECULATIVE_CONFIG" --compilation-config "$COMPILATION_CONFIG" "${COMMON_ARGS[@]}" "${DRY_ARGS[@]}"
-run_step_capture start_decode "$TMP_DIR/start_decode.out" env SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" bash "$SCRIPT_DIR/start_pd_role_service.sh" --role decode --node "$DECODE_NODE" --container "$DECODE_CONTAINER" --model-name "$MODEL_NAME" --model-short "$MODEL_SHORT" --container-model-path "$CONTAINER_MODEL_PATH" --host-model-path "$HOST_MODEL_PATH" --port "$DECODE_PORT" --tp "$TP" --gpu-range "$GPU_RANGE" --work-dir "$WORK_DIR_CONTAINER" --state "$STATE_CONTAINER" --vllm-host-ip "$DECODE_VLLM_HOST_IP" --network-ifname "$NETWORK_IFNAME" --nccl-ib-hca "$NCCL_IB_HCA" --quantization "$QUANTIZATION" --dtype "$DTYPE" --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" --max-num-seqs "$MAX_NUM_SEQS" --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" --max-model-len "$MAX_MODEL_LEN" --speculative-config "$SPECULATIVE_CONFIG" --compilation-config "$COMPILATION_CONFIG" "${COMMON_ARGS[@]}" "${DRY_ARGS[@]}"
+DECODE_CONTAINER_CREATED=1
+run_step_capture start_prefill "$TMP_DIR/start_prefill.out" env SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" bash "$SCRIPT_DIR/start_pd_role_service.sh" --role prefill --node "$PREFILL_NODE" --container "$PREFILL_CONTAINER" --model-name "$MODEL_NAME" --model-short "$MODEL_SHORT" --container-model-path "$CONTAINER_MODEL_PATH" --host-model-path "$HOST_MODEL_PATH" --port "$PREFILL_PORT" --transfer-port "$PREFILL_TRANSFER_PORT" --tp "$TP" --gpu-range "$GPU_RANGE" --work-dir "$WORK_DIR_CONTAINER" --state "$STATE_CONTAINER" --vllm-host-ip "$PREFILL_VLLM_HOST_IP" --network-ifname "$NETWORK_IFNAME" --nccl-ib-hca "$NCCL_IB_HCA" --quantization "$QUANTIZATION" --dtype "$DTYPE" --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" --max-num-seqs "$MAX_NUM_SEQS" --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" --max-model-len "$MAX_MODEL_LEN" --speculative-config "$SPECULATIVE_CONFIG" --compilation-config "$COMPILATION_CONFIG" --extra-args "$PREFILL_EXTRA_ARGS" "${COMMON_ARGS[@]}" "${DRY_ARGS[@]}"
+run_step_capture start_decode "$TMP_DIR/start_decode.out" env SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" bash "$SCRIPT_DIR/start_pd_role_service.sh" --role decode --node "$DECODE_NODE" --container "$DECODE_CONTAINER" --model-name "$MODEL_NAME" --model-short "$MODEL_SHORT" --container-model-path "$CONTAINER_MODEL_PATH" --host-model-path "$HOST_MODEL_PATH" --port "$DECODE_PORT" --tp "$TP" --gpu-range "$GPU_RANGE" --work-dir "$WORK_DIR_CONTAINER" --state "$STATE_CONTAINER" --vllm-host-ip "$DECODE_VLLM_HOST_IP" --network-ifname "$NETWORK_IFNAME" --nccl-ib-hca "$NCCL_IB_HCA" --quantization "$QUANTIZATION" --dtype "$DTYPE" --max-num-batched-tokens "$MAX_NUM_BATCHED_TOKENS" --max-num-seqs "$MAX_NUM_SEQS" --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" --max-model-len "$MAX_MODEL_LEN" --speculative-config "$SPECULATIVE_CONFIG" --compilation-config "$COMPILATION_CONFIG" --extra-args "$DECODE_EXTRA_ARGS" "${COMMON_ARGS[@]}" "${DRY_ARGS[@]}"
 PREFILL_LOG="${WORK_DIR_CONTAINER}/logs/${MODEL_SHORT}-prefill-vllm-server.log"
 DECODE_LOG="${WORK_DIR_CONTAINER}/logs/${MODEL_SHORT}-decode-vllm-server.log"
 run_step_capture wait_prefill "$TMP_DIR/wait_prefill.out" env SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" bash "$SCRIPT_DIR/wait_vllm_ready.sh" --node "$PREFILL_NODE" --container "$PREFILL_CONTAINER" --port "$PREFILL_PORT" --log "$PREFILL_LOG" --model-path "$CONTAINER_MODEL_PATH" --state "$STATE_CONTAINER" --timeout 1800 --interval 30 "${DRY_ARGS[@]}"
@@ -150,6 +199,11 @@ run_step_capture start_proxy "$TMP_DIR/start_proxy.out" env SKILL_CONTAINER_ROOT
 run_step_capture wait_proxy "$TMP_DIR/wait_proxy.out" env SKILL_CONTAINER_ROOT="$SKILL_CONTAINER_ROOT" bash "$SCRIPT_DIR/wait_mooncake_proxy_ready.sh" --node "$PROXY_NODE" --container "$PROXY_CONTAINER" --port "$PROXY_PORT" --state "$STATE_CONTAINER" --timeout 600 --interval 10 "${COMMON_ARGS[@]}" "${DRY_ARGS[@]}"
 PROXY_SERVED_MODEL_ID="$(extract_value PROXY_SERVED_MODEL_ID "$TMP_DIR/wait_proxy.out" || true)"
 BENCH_MODEL_ID="${PROXY_SERVED_MODEL_ID:-${DECODE_SERVED_MODEL_ID:-$CONTAINER_MODEL_PATH}}"
+BENCH_MODEL_ID_SOURCE="config_fallback"
+if [[ -n "$PROXY_SERVED_MODEL_ID" ]]; then BENCH_MODEL_ID_SOURCE="proxy"; elif [[ -n "$DECODE_SERVED_MODEL_ID" ]]; then BENCH_MODEL_ID_SOURCE="decode"; fi
+if [[ "$DRY_RUN" != "1" ]]; then
+  python3 "$SCRIPT_DIR/update_state.py" --state "$STATE_HOST" --set "model.bench_model_id=$BENCH_MODEL_ID" --set "model.bench_model_id_source=$BENCH_MODEL_ID_SOURCE" >/dev/null || true
+fi
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "DRY_RUN_STEP: render_report before/after stop would use state=$STATE_HOST and csv=${WORK_DIR_HOST}/csvs/${TEST_MODE}/all.csv"
 fi
@@ -164,6 +218,7 @@ CSV_HOST="$(extract_value CSV_HOST "$TMP_DIR/bench.out" || true)"
 if [[ "$DRY_RUN" != "1" ]]; then
   OUTPUT_HOST_ROOT="$OUTPUT_HOST_ROOT" OUTPUT_CONTAINER_ROOT="$OUTPUT_CONTAINER_ROOT" python3 "$SCRIPT_DIR/render_report.py" --run-id "$RUN_ID" --state "$STATE_HOST" --csv "$CSV_HOST" --report-dir "$REPORT_DIR" || true
 fi
+trap - ERR
 echo "== stop_decode =="
 bash "$SCRIPT_DIR/stop_service.sh" --node "$DECODE_NODE" --container "$DECODE_CONTAINER" --port "$DECODE_PORT" --state "$STATE_HOST" "${COMMON_ARGS[@]}" "${DRY_ARGS[@]}" || true
 echo "== stop_prefill =="

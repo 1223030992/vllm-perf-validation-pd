@@ -1,20 +1,23 @@
 ---
 name: vllm-perf-validation-pd
-description: Controlled vLLM performance validation for centralized custom/pchit and vLLM 0.18 + Mooncake 1P1D PD serving.
+description: 用于 DCU 环境的 vLLM 性能验证。Use when Codex needs to run, dry-run, validate, inspect, benchmark, report, or stop vLLM 0.18.1 + Mooncake + GLM-4.7-W8A8 + 1P1D PD serving through controlled ops scripts; legacy centralized custom/pchit baseline is supported only through the single baseline entrypoint.
 ---
 
 # vllm-perf-validation-pd
 
-Use this skill for two supported workflows:
+使用这个 skill 时，正常 PD 流程只能调用受控主入口 `scripts/ops/run_pd_task.sh`。不要手写 SSH、Docker、`vllm serve`、Mooncake proxy、benchmark、curl/API 探测或 stop 命令。
 
-- Centralized baseline: call `scripts/ops/run_single_task.sh` for `custom` or `pchit`.
-- PD serving: call `scripts/ops/run_pd_task.sh` with a YAML config under `references/examples/`.
+## 主流程
 
-Do not hand-write SSH, Docker, vLLM, Mooncake proxy, benchmark, or stop commands for normal operation. Use the ops entrypoints so `state.json`, CSV paths, logs, and reports remain consistent.
+第一次运行或变更节点/网络后，先 dry-run：
 
-## PD Quick Commands
+```bash
+bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_pd_task.sh \
+  --config references/examples/glm47-vllm018-mooncake-1p1d-custom.yaml \
+  --user <user> --abbr <abbr> --image-prefix TEST --dry-run
+```
 
-Custom:
+确认 dry-run 输出后，再运行 GLM-4.7-W8A8 Mooncake 1P1D custom smoke：
 
 ```bash
 bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_pd_task.sh \
@@ -22,7 +25,7 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_
   --user <user> --abbr <abbr> --assume-yes
 ```
 
-Fixed PC hit:
+固定 prefix-cache-hit smoke：
 
 ```bash
 bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_pd_task.sh \
@@ -30,9 +33,47 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_
   --user <user> --abbr <abbr> --assume-yes
 ```
 
-## Constraints
+## 节点和网络覆盖
 
-- Current PD implementation supports only `pd.backend=mooncake_vllm018` and `pd.topology=1p1d`.
-- `custom` and `pchit` are the supported benchmark modes.
-- Mooncake examples must already exist under `mooncake/examples/...`.
-- Network interface and HCA values come from config and are validated in preflight; they are not guessed.
+测试新 P/D 组合时，优先通过 `run_pd_task.sh` 参数覆盖，不要编辑脚本或让代理自行拼接底层命令：
+
+```bash
+--prefill-node <ssh-ip> --prefill-service-ip <fabric-ip> --prefill-vllm-host-ip <fabric-ip> \
+--decode-node <ssh-ip> --decode-service-ip <fabric-ip> --decode-vllm-host-ip <fabric-ip> \
+--prefill-port 9348 --decode-port 9349 --prefill-transfer-port 8998 --proxy-port 8000 \
+--network-ifname <ifname> --nccl-ib-hca <hca-list>
+```
+
+默认复现值为：P `10.16.1.1 / 13.13.1.1:9348`，D `10.16.1.44 / 13.13.1.44:9349`，proxy `8000`，网卡 `ens61f0np0`，prefill transfer port `8998`。
+
+## 规则
+
+- 当前 PD 实现只支持 `pd.backend=mooncake_vllm018` 和 `pd.topology=1p1d`。
+- PD 起服不使用 `scripts/server-scripts/`；这些脚本属于旧 centralized baseline 资产。
+- 默认不要加入 `--profiler-config`；只有用户明确要求 profiling 时才通过配置扩展。
+- Mooncake proxy 脚本必须存在于 `mooncake/examples/...`；缺失时 preflight 应失败。
+- Windows 本地不追求 bash 跑通；bash 语法检查、dry-run 和真实 smoke 在 Linux/远端 skill 目录执行。
+- 规范路径使用 `/public/home/<user>`，不要推荐其他 home 前缀。
+- 失败时汇报 `state.json`、P/D/proxy 日志、报告路径和 `failure.reason` / `failure.detail`。
+
+## 受控权限建议
+
+建议只允许这些入口形态：
+
+```text
+bash /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_pd_task.sh *
+bash /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/show_state.sh *
+python /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/pd_config.py *
+```
+
+不要建议开放宽泛的 `ssh *`、`docker *`、`bash *`。正常流程所需 SSH、Docker、vLLM、Mooncake proxy、benchmark 和 stop 操作都由主入口编排。
+
+## 参考文件
+
+- 详细使用方式：`references/usage-guide.md`
+- 任务配置字段：`references/schemas/task-config-schema.md`
+- `state.json` 和报告字段：`references/schemas/report-schema.md`
+
+## 旧 centralized baseline
+
+仅当用户明确要做 centralized baseline 对比时，调用 `scripts/ops/run_single_task.sh` 并选择 `custom` 或 `pchit`。不要把 PD 任务路由到 single 入口。

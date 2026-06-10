@@ -1,66 +1,42 @@
 task:
-  name: vllm_perf_single_glm47_smoke
+  name: glm47_vllm018_mooncake_1p1d_custom_smoke
   run_id: auto
   owner: liuzhihuan
-  description: "GLM-4.7-W8A8 单节点冒烟性能测试"
+  description: GLM-4.7-W8A8 vLLM 0.18.1 + Mooncake 1P1D custom smoke
 
-mode: single
-
-paths:
-  skill_host_root: /public/home/<user>/.claude/skills/vllm-perf-validation-pd
-  skill_container_root: /mnt/.claude/skills/vllm-perf-validation-pd
-  output_host_root: /public/home/<user>/skilltest/vllm-perf-validation-pd
-  output_container_root: /mnt/skilltest/vllm-perf-validation-pd
+mode: pd
 
 image:
-  name: 25401bd053af
+  name: 10.16.1.152:5000/jenkins/model_test_env/vllm:0.18.1-ubuntu22.04-dtk26.04-py3.10-20260608-1434
   pull_policy: if_not_present
 
-node:
-  ip: 10.16.1.9
-  dcu_type: BW1000
-  gpu_count: 8
-
-container:
-  name_template: "<container_prefix>-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>"
-
-ops:
-  preflight_script: scripts/ops/preflight_node.sh
-  create_container_script: scripts/ops/create_container.sh
-  start_service_script: scripts/ops/start_vllm_service.sh
-  wait_ready_script: scripts/ops/wait_vllm_ready.sh
-  run_bench_script: scripts/ops/run_bench.sh
-  stop_service_script: scripts/ops/stop_service.sh
-  render_report_script: scripts/ops/render_report.py
-
-models:
-  - name: GLM-4.7-W8A8
-    model_short: glm47int8
-    host_model_path: /public/opendas/DL_DATA/llm-models/glm4.7/GLM-4.7-W8A8
-    container_model_path: /model/GLM-4.7-W8A8
-    served_model_id: null
-    bench_model_id: null
-    tp: 8
-    port: 9348
-    gpu_range: "0,1,2,3,4,5,6,7"
-    service_script: scripts/server-scripts/run_glm47int8-server.sh
-
-service:
-  health_check:
-    endpoint: /v1/chat/completions
-    timeout_seconds: 1800
+pd:
+  profile: references/pd-profiles/glm47-vllm018-mooncake.yaml
+  network:
+    ifname: ens61f0np0
+    nccl_ib_hca: mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_8,mlx5_9
+  roles:
+    prefill:
+      node: 10.16.1.1
+      service_ip: 13.13.1.1
+      vllm_host_ip: 13.13.1.1
+      port: 9348
+      transfer_port: 8998
+    decode:
+      node: 10.16.1.44
+      service_ip: 13.13.1.44
+      vllm_host_ip: 13.13.1.44
+      port: 9349
+  proxy:
+    node_role: prefill
+    port: 8000
 
 test:
   mode: custom
-  script: scripts/client-scripts/run_perf_test-custom.sh
   params:
     input_lens: [512]
     output_len: 32
     concurrencies: [1]
     num_prompts_mult: 1
+    request_rate: null
     percentiles: "50,95,99"
-
-output:
-  work_dir: /public/home/<user>/skilltest/vllm-perf-validation-pd/work_dirs
-  report_dir: /public/home/<user>/skilltest/vllm-perf-validation-pd/reports
-  csv_dir: /public/home/<user>/skilltest/vllm-perf-validation-pd/csvs

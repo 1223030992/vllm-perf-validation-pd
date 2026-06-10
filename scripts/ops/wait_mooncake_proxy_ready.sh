@@ -37,7 +37,9 @@ except Exception:
 PY
 )
   if ss -tlnp 2>/dev/null | grep -q ":\$PORT "; then
-    python3 "\$SKILL_CONTAINER_ROOT/scripts/ops/update_state.py" --state "\$STATE" --set "pd.proxy.status=READY" --set "pd.proxy.readiness_duration_seconds=\$ELAPSED" --set "pd.proxy.models_json_summary=\$MODELS_JSON" --set "pd.proxy.served_model_id=\$SERVED_MODEL_ID"
+    MODEL_ID_SOURCE="proxy"
+    if [[ -z "\$SERVED_MODEL_ID" ]]; then MODEL_ID_SOURCE="unavailable"; fi
+    python3 "\$SKILL_CONTAINER_ROOT/scripts/ops/update_state.py" --state "\$STATE" --set "pd.proxy.status=READY" --set "pd.proxy.readiness_duration_seconds=\$ELAPSED" --set "pd.proxy.models_json_summary=\$MODELS_JSON" --set "pd.proxy.served_model_id=\$SERVED_MODEL_ID" --set "pd.proxy.served_model_id_source=\$MODEL_ID_SOURCE"
     echo "PROXY_READY=1"; echo "PROXY_SERVED_MODEL_ID=\$SERVED_MODEL_ID"; exit 0
   fi
   if (( ELAPSED >= TIMEOUT )); then

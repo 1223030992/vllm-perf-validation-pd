@@ -108,17 +108,27 @@ def deep_merge(base, override):
 
 def resolve_profile(config_path, profile_ref):
     ref = Path(str(profile_ref))
+    skill_root = Path(__file__).resolve().parents[2]
     candidates = []
     if ref.is_absolute():
         candidates.append(ref)
     else:
+        if str(ref).startswith("references/") or str(ref).startswith("references\\"):
+            candidates.append(skill_root / ref)
         candidates.append(config_path.parent / ref)
-        candidates.append(config_path.parents[2] / ref)
+        for parent in config_path.parents:
+            candidates.append(parent / ref)
+        candidates.append(skill_root / ref)
+
+    seen = set()
     for candidate in candidates:
+        resolved = candidate.resolve(strict=False)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
         if candidate.exists():
             return candidate
     raise SystemExit(f"PD profile not found: {profile_ref}")
-
 
 def load_with_profile(config_path):
     config_path = Path(config_path).resolve()

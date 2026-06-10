@@ -7,22 +7,25 @@ task:
 mode: pd
 
 image:
-  name: 25401bd053af
+  name: 10.16.1.152:5000/jenkins/model_test_env/vllm:0.18.1-ubuntu22.04-dtk26.04-py3.10-20260608-1434
   pull_policy: if_not_present
 
 pd:
   profile: references/pd-profiles/glm47-vllm018-mooncake.yaml
+  network:
+    ifname: ens61f0np0
+    nccl_ib_hca: mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_8,mlx5_9
   roles:
     prefill:
       node: 10.16.1.1
       service_ip: 13.13.1.1
-      vllm_host_ip: 10.16.1.1
+      vllm_host_ip: 13.13.1.1
       port: 9348
       transfer_port: 8998
     decode:
       node: 10.16.1.44
       service_ip: 13.13.1.44
-      vllm_host_ip: 10.16.1.44
+      vllm_host_ip: 13.13.1.44
       port: 9349
   proxy:
     node_role: prefill

@@ -12,6 +12,7 @@ state.json
 # IDE 配置
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~

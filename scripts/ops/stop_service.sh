@@ -3,15 +3,11 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-用法:
-  stop_service.sh --node NODE --container NAME --port PORT [--state STATE]
+Usage:
+  stop_service.sh --node NODE --container NAME --port PORT [--state STATE] [--dry-run]
 
-选项:
-  --dry-run
-
-说明:
-  本脚本只执行 docker stop 并验证端口释放，永远不会执行 docker rm。
-  如果传入的 state 是容器路径 /mnt/skilltest/...，脚本会自动转换为宿主机路径后再更新 state.json。
+Stops the container with docker stop, verifies the service port is released, and
+updates state.json when --state is provided. This script never runs docker rm.
 USAGE
 }
 
@@ -24,7 +20,7 @@ run_in_container() {
   local docker_cmd
   docker_cmd="docker exec -i $(quote_sh "$CONTAINER") bash -ic 'tmp=/tmp/vllm_ops_stop_\$\$.sh; cat > \"\$tmp\"; bash \"\$tmp\"; rc=\$?; rm -f \"\$tmp\"; exit \$rc'"
   if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    echo "即将在容器内归还运行产物权限:"
+    echo "DRY_RUN: restore artifact permissions in container:"
     printf 'ssh %q %q\n' "$NODE" "$docker_cmd"
     echo "--- container script ---"
     printf '%s\n' "$script"
@@ -39,7 +35,6 @@ PORT=""
 STATE=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-# shellcheck source=/dev/null
 source "$SCRIPT_DIR/runtime_config.sh"
 SKILL_USER=""
 USER_ABBR=""
@@ -47,6 +42,7 @@ HOME_ROOT=""
 HOST_HOME_ROOT=""
 SKILL_HOST_ROOT="${SKILL_HOST_ROOT:-}"
 OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-}"
+OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-}"
 CONTAINER_PREFIX=""
 DRY_RUN="${DRY_RUN:-0}"
 
@@ -62,13 +58,13 @@ while [[ $# -gt 0 ]]; do
     --state) STATE="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --help) usage; exit 0 ;;
-    *) echo "未知参数: $1" >&2; usage; exit 2 ;;
+    *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
 
-[[ -n "$NODE" ]] || { echo "缺少参数: --node" >&2; exit 2; }
-[[ -n "$CONTAINER" ]] || { echo "缺少参数: --container" >&2; exit 2; }
-[[ -n "$PORT" ]] || { echo "缺少参数: --port" >&2; exit 2; }
+[[ -n "$NODE" ]] || { echo "missing argument: --node" >&2; exit 2; }
+[[ -n "$CONTAINER" ]] || { echo "missing argument: --container" >&2; exit 2; }
+[[ -n "$PORT" ]] || { echo "missing argument: --port" >&2; exit 2; }
 resolve_runtime_config
 
 state_host_path() {
@@ -96,7 +92,7 @@ update_state_local() {
   if python3 "$SKILL_HOST_ROOT/scripts/ops/update_state.py" --state "$STATE_HOST" "$@"; then
     return 0
   fi
-  echo "警告: state.json 更新失败，但不立即中断 stop 流程: $STATE_HOST" >&2
+  echo "WARN: failed to update state.json, continuing stop flow: $STATE_HOST" >&2
   return 1
 }
 
@@ -119,7 +115,7 @@ fi
 EOF
 )
   run_in_container "$script" || {
-    echo "警告: 容器内产物权限归还失败，继续尝试停止容器。" >&2
+    echo "WARN: failed to restore artifact permissions; continuing container stop." >&2
     return 1
   }
 }
@@ -137,7 +133,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     printf 'python3 %q --state %q --set status=STOPPING\n' "$SKILL_HOST_ROOT/scripts/ops/update_state.py" "$STATE_HOST"
   fi
   printf 'ssh %q %q\n' "$NODE" "docker stop $(quote_sh "$CONTAINER")"
-  printf 'ssh %q %q\n' "$NODE" "ss -tlnp | grep ':$PORT ' || echo '端口 $PORT 已释放'"
+  printf 'ssh %q %q\n' "$NODE" "ss -tlnp 2>/dev/null | grep ':$PORT ' || echo 'port $PORT released'"
   if [[ -n "$STATE_HOST" ]]; then
     printf 'python3 %q --state %q --set status=STOPPED --set service.port_released=true --set timing.stop_epoch=<epoch>\n' "$SKILL_HOST_ROOT/scripts/ops/update_state.py" "$STATE_HOST"
   fi
@@ -149,14 +145,14 @@ update_state_local --set "status=STOPPING" || true
 
 if ! ssh "$NODE" "docker stop $(quote_sh "$CONTAINER")"; then
   update_state_local --set "status=STOP_FAILED" --set "failure.reason=docker_stop_failed" || true
-  echo "docker stop 执行失败: $CONTAINER" >&2
+  echo "docker stop failed: $CONTAINER" >&2
   exit 1
 fi
 sleep 5
 
 if ssh "$NODE" "ss -tlnp 2>/dev/null | grep ':$PORT '" >/dev/null 2>&1; then
   update_state_local --set "status=STOP_FAILED" --set "failure.reason=port_still_in_use_after_stop" || true
-  echo "停止容器后端口仍被占用: $PORT" >&2
+  echo "port still in use after stop: $PORT" >&2
   exit 1
 fi
 
@@ -167,7 +163,7 @@ update_state_local \
   --set "timing.stop_epoch=$STOP_TS" \
   --set "paths.state_file_host=$STATE_HOST" || true
 
-echo "端口 $PORT 已释放"
+echo "port $PORT released"
 if [[ -n "$STATE_HOST" ]]; then
   echo "STATE_HOST=$STATE_HOST"
 fi

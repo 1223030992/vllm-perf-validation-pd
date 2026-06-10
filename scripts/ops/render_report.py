@@ -195,6 +195,19 @@ def first_state_path(state, keys):
     return None
 
 
+def state_is_failure(state):
+    if state.get("status") in {
+        "SERVICE_FAILED",
+        "SERVICE_TIMEOUT",
+        "SERVICE_PROCESS_MISSING",
+        "SERVICE_PORT_MISMATCH",
+        "BENCH_FAILED",
+        "STOP_FAILED",
+    }:
+        return True
+    return bool(state.get("failure"))
+
+
 def main():
     parser = argparse.ArgumentParser(description="根据 state.json 和 CSV 生成 vLLM 性能报告")
     parser.add_argument("--run-id", required=True)
@@ -222,13 +235,14 @@ def main():
             raise SystemExit("未传入 --csv，且 state 中没有 paths.csv_file_host / paths.csv_file")
         csv_file = Path(csv_path)
     csv_file = readable_path(csv_file)
-    if not csv_file.exists():
+    csv_missing = not csv_file.exists()
+    if csv_missing and not state_is_failure(state):
         raise SystemExit("CSV 文件不存在: {}".format(csv_file))
 
-    rows = load_csv(csv_file)
+    rows = [] if csv_missing else load_csv(csv_file)
     summary = summarize(rows)
     final_status = summary["status"]
-    if state.get("status") in {"SERVICE_FAILED", "SERVICE_TIMEOUT", "BENCH_FAILED", "STOP_FAILED"}:
+    if state_is_failure(state):
         final_status = "FAIL"
 
     report_dir = writable_path(args.report_dir)
@@ -245,7 +259,7 @@ def main():
         "model": state.get("model", {}),
         "pd": state.get("pd", {}),
         "deployment": {
-            "status": "PASS" if state.get("status") not in {"SERVICE_FAILED", "SERVICE_TIMEOUT"} else "FAIL",
+            "status": "FAIL" if state_is_failure(state) else "PASS",
             "startup_duration_seconds": deep_get(state, "timing.startup_duration_seconds"),
             "readiness_duration_seconds": deep_get(state, "timing.readiness_duration_seconds"),
             "stop_epoch": deep_get(state, "timing.stop_epoch"),
@@ -257,12 +271,14 @@ def main():
         "test": {
             "mode": deep_get(state, "test.mode"),
             "status": deep_get(state, "test.status", summary["status"]),
-            "csv_file": str(csv_file),
+            "csv_file": None if csv_missing else str(csv_file),
+            "csv_missing": csv_missing,
             "pchit_json_file": deep_get(state, "paths.pchit_json_file_host")
             or deep_get(state, "paths.pchit_json_file"),
         },
         "results": {
-            "csv_file": str(csv_file),
+            "csv_file": None if csv_missing else str(csv_file),
+            "csv_missing": csv_missing,
             "pchit_json_file": deep_get(state, "paths.pchit_json_file_host")
             or deep_get(state, "paths.pchit_json_file"),
             "log_file": log_file,
@@ -305,7 +321,7 @@ def main():
         "- 端口已释放: {}".format(deep_get(state, "service.port_released")),
         "- 工作目录(宿主机): `{}`".format(deep_get(state, "paths.work_dir_host")),
         "- 工作目录(容器): `{}`".format(work_dir_container),
-        "- CSV: `{}`".format(csv_file),
+        "- CSV: `{}`".format("missing" if csv_missing else csv_file),
         "- 日志: `{}`".format(log_file),
         "- 场景数: {}".format(summary["total_scenarios"]),
         "- 通过: {}".format(summary["passed"]),
