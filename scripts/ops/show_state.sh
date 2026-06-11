@@ -3,12 +3,12 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-用法:
+Usage:
   show_state.sh --state STATE [--node NODE] [--full]
 
-说明:
-  固定入口读取 state.json，避免使用 python3 -c 触发额外权限询问。
-  如果传入 --node，会在目标节点宿主机执行读取。
+Description:
+  Controlled entrypoint for reading a PD task state.json.
+  If --node is provided, the state file is read on that remote node.
 USAGE
 }
 
@@ -29,7 +29,7 @@ NODE=""
 STATE=""
 FULL=0
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/runtime_config.sh"
 SKILL_USER=""
@@ -50,11 +50,11 @@ while [[ $# -gt 0 ]]; do
     --state) STATE="$2"; shift 2 ;;
     --full) FULL=1; shift ;;
     --help) usage; exit 0 ;;
-    *) echo "未知参数: $1" >&2; usage; exit 2 ;;
+    *) echo "unknown_arg=$1" >&2; usage; exit 2 ;;
   esac
 done
 
-[[ -n "$STATE" ]] || { echo "缺少参数: --state" >&2; exit 2; }
+[[ -n "$STATE" ]] || { echo "missing_arg=--state" >&2; exit 2; }
 resolve_runtime_config
 STATE_HOST="$(state_host_path "$STATE")"
 

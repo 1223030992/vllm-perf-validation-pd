@@ -1,6 +1,6 @@
 ---
 name: vllm-perf-validation-pd
-description: 用于 DCU 环境的 vLLM 性能验证。Use when Codex needs to run, dry-run, validate, inspect, benchmark, report, or stop vLLM 0.18.1 + Mooncake + GLM-4.7-W8A8 + 1P1D PD serving through controlled ops scripts; legacy centralized custom/pchit baseline is supported only through the single baseline entrypoint.
+description: 用于 DCU 环境的 vLLM PD 分离性能验证。Use when Codex needs to run, dry-run, validate, inspect, benchmark, report, or stop vLLM 0.18.1 + Mooncake + GLM-4.7-W8A8 + 1P1D PD serving through controlled ops scripts.
 ---
 
 # vllm-perf-validation-pd
@@ -49,7 +49,7 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_
 ## 规则
 
 - 当前 PD 实现只支持 `pd.backend=mooncake_vllm018` 和 `pd.topology=1p1d`。
-- PD 起服不使用 `scripts/server-scripts/`；这些脚本属于旧 centralized baseline 资产。
+- PD 起服不使用旧 `scripts/server-scripts/`；vLLM018 + Mooncake PD server 脚本按模型放在 `scripts/pd-server/<model>/`。
 - 默认不要加入 `--profiler-config`；只有用户明确要求 profiling 时才通过配置扩展。
 - Mooncake proxy 脚本必须存在于 `mooncake/examples/...`；缺失时 preflight 应失败。
 - Windows 本地不追求 bash 跑通；bash 语法检查、dry-run 和真实 smoke 在 Linux/远端 skill 目录执行。
@@ -74,6 +74,6 @@ python /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/pd_conf
 - 任务配置字段：`references/schemas/task-config-schema.md`
 - `state.json` 和报告字段：`references/schemas/report-schema.md`
 
-## 旧 centralized baseline
+## single baseline
 
-仅当用户明确要做 centralized baseline 对比时，调用 `scripts/ops/run_single_task.sh` 并选择 `custom` 或 `pchit`。不要把 PD 任务路由到 single 入口。
+本仓库不再内置维护 single/vLLM015 baseline。需要 centralized baseline 时，使用独立项目 `vllm-perf-validation-single`。

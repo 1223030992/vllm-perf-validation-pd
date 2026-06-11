@@ -1,7 +1,7 @@
 interface:
   display_name: "vLLM Mooncake PD 验证"
   short_description: "通过受控入口执行 vLLM 0.18.1 + Mooncake 1P1D PD 性能验证。"
-  default_prompt: "使用 $vllm-perf-validation-pd 执行 GLM-4.7-W8A8 vLLM 0.18.1 + Mooncake 1P1D PD 验证。正常流程只调用主入口：bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_pd_task.sh --config references/examples/glm47-vllm018-mooncake-1p1d-custom.yaml --user <user> --abbr <abbr> --image-prefix TEST --dry-run；确认后再用 --assume-yes 真实运行。不要手写 SSH、Docker、vLLM serve、Mooncake proxy、benchmark、curl/API 探测或 stop 命令。run_single_task.sh 仅用于旧 centralized custom/pchit baseline。"
+  default_prompt: "使用 $vllm-perf-validation-pd 执行 GLM-4.7-W8A8 vLLM 0.18.1 + Mooncake 1P1D PD 验证。正常流程只调用主入口：bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_pd_task.sh --config references/examples/glm47-vllm018-mooncake-1p1d-custom.yaml --user <user> --abbr <abbr> --image-prefix TEST --dry-run；确认后再用 --assume-yes 真实运行。不要手写 SSH、Docker、vLLM serve、Mooncake proxy、benchmark、curl/API 探测或 stop 命令。single/vLLM015 baseline 请使用独立项目 vllm-perf-validation-single。"
 
 policy:
   allow_implicit_invocation: false

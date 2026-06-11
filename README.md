@@ -1,10 +1,10 @@
 # vllm-perf-validation-pd
 
-这是用于 DCU 环境的 vLLM 性能验证 skill。当前主线是稳定复现：
+这是用于 DCU 环境的 vLLM PD 分离性能验证 skill。当前主线是稳定复现：
 
 - `vLLM 0.18.1 + Mooncake + GLM-4.7-W8A8 + 1P1D PD`
-- benchmark 先复用 `custom` / `pchit`，请求统一打到 Mooncake proxy
-- 旧 single 流程只保留为 centralized baseline，不参与 PD 起服
+- benchmark 暂时复用 `custom` / `pchit`，请求统一打到 Mooncake proxy
+- single/vLLM015 baseline 不在本仓库维护，请使用独立项目 `vllm-perf-validation-single`
 
 正常 PD 流程只调用一个主入口：`scripts/ops/run_pd_task.sh`。不要手写 SSH、Docker、`vllm serve`、Mooncake proxy、benchmark、curl 探测或 stop 命令。
 
@@ -62,6 +62,22 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_
 - Proxy：运行在 prefill 容器中，端口 `8000`
 - 网卡：`ens61f0np0`
 - 默认不加入 `--profiler-config`
+
+## PD Server 脚本目录
+
+旧 `scripts/server-scripts/` 已从 PD 仓库移除，因为它属于 single/vLLM015 起服方式。后续 vLLM018 + Mooncake PD 起服脚本按模型放在：
+
+```text
+scripts/pd-server/<model>/
+```
+
+当前已预留：
+
+```text
+scripts/pd-server/glm47-w8a8/
+```
+
+你后续传入 GLM-4.7-W8A8 原始 1P1D 起服脚本后，再在该目录中做参数化和标准化。
 
 ## 本地和远端验证边界
 
@@ -128,6 +144,6 @@ JSON/Markdown report：
 失败原因或注意事项：
 ```
 
-## 旧 centralized baseline
+## single baseline
 
-`scripts/ops/run_single_task.sh` 只用于 centralized baseline 的 `custom` / `pchit` 对比。PD 起服不要使用 `scripts/server-scripts/`、`start_vllm_service.sh` 或旧 vLLM015 启动方式。
+本仓库不再内置维护 single/vLLM015 baseline。需要 centralized baseline 时，请使用独立项目 `vllm-perf-validation-single`。

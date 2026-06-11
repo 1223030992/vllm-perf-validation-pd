@@ -67,6 +67,22 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_
 - 网卡：`ens61f0np0`
 - 默认不加 `--profiler-config`
 
+## PD Server 脚本目录
+
+旧 `scripts/server-scripts/` 已从本仓库移除。后续 vLLM018 + Mooncake PD 起服脚本按模型存放：
+
+```text
+scripts/pd-server/<model>/
+```
+
+当前预留目录：
+
+```text
+scripts/pd-server/glm47-w8a8/
+```
+
+该目录用于后续接收 GLM-4.7-W8A8 原始 1P1D 起服脚本，并在之后迭代为可参数化的标准化脚本。
+
 ## 产物路径
 
 每次运行写入：
@@ -107,6 +123,6 @@ python /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/pd_conf
 
 不要建议开放 `ssh *`、`docker *`、`bash *`。
 
-## 旧 centralized baseline
+## single baseline
 
-`scripts/ops/run_single_task.sh` 只用于 centralized baseline 的 `custom` 和 `pchit` 对比。PD serving 不使用 `scripts/server-scripts/` 或旧 `start_vllm_service.sh`。
+本仓库不再内置维护 single/vLLM015 baseline。需要 centralized baseline 时，使用独立项目 `vllm-perf-validation-single`。
