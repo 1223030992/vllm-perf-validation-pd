@@ -6,10 +6,6 @@ task:
 
 mode: pd
 
-image:
-  name: 10.16.1.152:5000/jenkins/model_test_env/vllm:0.18.1-ubuntu22.04-dtk26.04-py3.10-20260608-1434
-  pull_policy: if_not_present
-
 pd:
   profile: references/pd-profiles/glm47-vllm018-mooncake.yaml
   network:

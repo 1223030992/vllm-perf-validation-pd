@@ -5,7 +5,7 @@ pd_profile:
 model:
   name: GLM-4.7-W8A8
   model_short: glm47int8
-  host_model_path: /public/opendas/DL_DATA/llm-models/glm4.7/GLM-4.7-W8A8
+  host_model_path: /public/opendas/DL_DATA/llm-models/GLM-4.7-W8A8
   container_model_path: /model/GLM-4.7-W8A8
   precision: int8
 
@@ -13,6 +13,13 @@ pd:
   backend: mooncake_vllm018
   topology: 1p1d
   mooncake_proxy_script: mooncake/examples/online_serving/disaggregated_serving/mooncake_connector/mooncake_connector_proxy.py
+  server_scripts:
+    prefill: scripts/pd-server/glm47-w8a8/p_server.sh
+    decode: scripts/pd-server/glm47-w8a8/d_server.sh
+    proxy: scripts/pd-server/glm47-w8a8/run_proxy.sh
+  runtime:
+    mooncake_wheel: null
+    mooncake_dest_device_affinity: true
   service_defaults:
     tp: 8
     gpu_range: "0,1,2,3,4,5,6,7"

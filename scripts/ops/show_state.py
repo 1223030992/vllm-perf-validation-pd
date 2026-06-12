@@ -33,7 +33,7 @@ def first_number(row, keys):
     return None
 
 
-def csv_summary(csv_file):
+def csv_summary(csv_file, test_mode=""):
     if not csv_file or not Path(csv_file).exists():
         return {}
     with Path(csv_file).open("r", encoding="utf-8-sig", newline="") as f:
@@ -57,9 +57,14 @@ def csv_summary(csv_file):
         "ttft_ms": ["mean_ttft", "mean_ttft_ms"],
         "tpot_ms": ["mean_tpot", "mean_tpot_ms"],
         "itl_p99_ms": ["p99_itl", "p99_itl_ms"],
-        "pchit_effective_pct": ["effective_cache_hit_pct"],
-        "pchit_best_sla_concurrency": ["concurrency"],
     }
+    if test_mode == "pchit":
+        metrics.update(
+            {
+                "pchit_effective_pct": ["effective_cache_hit_pct"],
+                "pchit_best_sla_concurrency": ["concurrency"],
+            }
+        )
     for label, keys in metrics.items():
         vals = values(keys)
         if vals:
@@ -100,8 +105,12 @@ def main():
         ("status", ["status"]),
         ("failure_reason", ["failure.reason"]),
         ("failure_stage", ["failure.stage"]),
+        ("failure_detail", ["failure.detail"]),
+        ("failure_exit_code", ["failure.exit_code"]),
         ("config", ["config.path"]),
         ("image", ["image"]),
+        ("prefill_image_id", ["image_ids.prefill"]),
+        ("decode_image_id", ["image_ids.decode"]),
         ("model", ["model.name", "model.container_model_path"]),
         ("served_model_id", ["model.served_model_id"]),
         ("bench_model_id", ["model.bench_model_id"]),
@@ -118,16 +127,54 @@ def main():
         ("prefill_vllm_host_ip", ["pd.roles.prefill.vllm_host_ip", "roles.prefill.vllm_host_ip"]),
         ("prefill_port", ["pd.roles.prefill.port", "roles.prefill.port"]),
         ("prefill_transfer_port", ["pd.roles.prefill.transfer_port", "roles.prefill.transfer_port"]),
+        ("prefill_status", ["pd.roles.prefill.status"]),
+        ("prefill_readiness_seconds", ["pd.roles.prefill.readiness_duration_seconds"]),
+        ("prefill_served_model_id", ["pd.roles.prefill.served_model_id"]),
+        ("prefill_runtime", ["pd.runtime.prefill.status"]),
+        ("prefill_mooncake_version", ["pd.runtime.prefill.mooncake_version"]),
         ("decode_node", ["pd.roles.decode.node", "roles.decode.node"]),
         ("decode_container", ["pd.roles.decode.container", "roles.decode.container"]),
         ("decode_service_ip", ["pd.roles.decode.service_ip", "roles.decode.service_ip"]),
         ("decode_vllm_host_ip", ["pd.roles.decode.vllm_host_ip", "roles.decode.vllm_host_ip"]),
         ("decode_port", ["pd.roles.decode.port", "roles.decode.port"]),
+        ("decode_status", ["pd.roles.decode.status"]),
+        ("decode_readiness_seconds", ["pd.roles.decode.readiness_duration_seconds"]),
+        ("decode_served_model_id", ["pd.roles.decode.served_model_id"]),
+        ("decode_runtime", ["pd.runtime.decode.status"]),
+        ("decode_mooncake_version", ["pd.runtime.decode.mooncake_version"]),
+        ("mooncake_dest_device_affinity", ["pd.runtime.mooncake_dest_device_affinity"]),
+        ("transfer_status", ["pd.transfer.status"]),
+        ("transfer_protocol", ["pd.transfer.protocol"]),
+        ("transfer_failure_reason", ["pd.transfer.failure_reason"]),
+        ("transfer_error_summary", ["pd.transfer.error_summary"]),
+        ("prefill_detected_hcas", ["pd.transfer.prefill.detected_hcas"]),
+        ("prefill_gid_indices", ["pd.transfer.prefill.gid_indices"]),
+        ("decode_detected_hcas", ["pd.transfer.decode.detected_hcas"]),
+        ("decode_gid_indices", ["pd.transfer.decode.gid_indices"]),
         ("proxy_node", ["pd.proxy.node", "proxy.node"]),
         ("proxy_container", ["pd.proxy.container", "proxy.container"]),
         ("proxy_port", ["pd.proxy.port", "proxy.port"]),
+        ("proxy_status", ["pd.proxy.status"]),
+        ("proxy_attempts", ["pd.proxy.attempts"]),
+        ("proxy_readiness_seconds", ["pd.proxy.readiness_duration_seconds"]),
+        ("proxy_listener_status", ["pd.proxy.listener.status"]),
+        ("proxy_listener_error", ["pd.proxy.listener.error"]),
+        ("proxy_prefill_upstream_status", ["pd.proxy.upstream.prefill.status"]),
+        ("proxy_decode_upstream_status", ["pd.proxy.upstream.decode.status"]),
+        ("proxy_bootstrap_status", ["pd.proxy.bootstrap.status"]),
+        ("proxy_smoke_status", ["pd.proxy.smoke.status"]),
+        ("proxy_smoke_http_code", ["pd.proxy.smoke.http_code"]),
+        ("proxy_smoke_error", ["pd.proxy.smoke.error"]),
         ("proxy_prefill_url", ["pd.proxy.prefill_url", "proxy.prefill_url"]),
         ("proxy_decode_url", ["pd.proxy.decode_url", "proxy.decode_url"]),
+        ("cleanup_policy", ["cleanup.policy"]),
+        ("containers_preserved", ["cleanup.containers_preserved"]),
+        ("cleanup_status", ["cleanup.status"]),
+        ("test_status", ["test.status"]),
+        ("test_current_case", ["test.current_case"]),
+        ("test_heartbeat_at", ["test.heartbeat_at"]),
+        ("test_elapsed_seconds", ["test.elapsed_seconds"]),
+        ("bench_timeout_seconds", ["test.bench_timeout_seconds"]),
         ("pchit_benchmark_mode", ["pchit.benchmark.mode"]),
         ("pchit_target_pct", ["pchit.benchmark.target_pct"]),
         ("pchit_effective_pct", ["pchit.benchmark.effective_cache_hit_pct"]),
@@ -137,7 +184,8 @@ def main():
         emit_field(label, state, *paths)
 
     csv_file = deep_get(state, "paths.csv_file_host") or deep_get(state, "paths.csv_file")
-    for label, value in sorted(csv_summary(csv_file).items()):
+    test_mode = str(deep_get(state, "test.mode", "") or "").lower()
+    for label, value in sorted(csv_summary(csv_file, test_mode).items()):
         print("{}={}".format(label.upper(), value))
     return 0
 

@@ -15,6 +15,8 @@ Options:
   --container-prefix PREFIX
   --host-home-root PATH
   --name NAME                 Use an already generated container name
+  --host-model-path PATH      Mount this model directory read-only
+  --container-model-path PATH Container mount target for the model
   --dry-run
   --allow-image-prefix-fallback
 
@@ -40,6 +42,8 @@ OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-}"
 DATE_PART="$(date +%m%d)"
 IMAGE_PREFIX=""
 CONTAINER_NAME=""
+HOST_MODEL_PATH=""
+CONTAINER_MODEL_PATH=""
 CONTAINER_PREFIX=""
 DRY_RUN="${DRY_RUN:-0}"
 IMAGE_PREFIX_FALLBACK="${IMAGE_PREFIX_FALLBACK:-0}"
@@ -92,6 +96,8 @@ while [[ $# -gt 0 ]]; do
     --date) DATE_PART="$2"; shift 2 ;;
     --image-prefix) IMAGE_PREFIX="$2"; shift 2 ;;
     --name) CONTAINER_NAME="$2"; shift 2 ;;
+    --host-model-path) HOST_MODEL_PATH="$2"; shift 2 ;;
+    --container-model-path) CONTAINER_MODEL_PATH="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --allow-image-prefix-fallback) IMAGE_PREFIX_FALLBACK=1; shift ;;
     --help) usage; exit 0 ;;
@@ -102,6 +108,8 @@ done
 [[ -n "$NODE" ]] || { echo "missing argument: --node" >&2; exit 2; }
 [[ -n "$IMAGE" ]] || { echo "missing argument: --image" >&2; exit 2; }
 [[ -n "$MODEL_SHORT" ]] || { echo "missing argument: --model-short" >&2; exit 2; }
+[[ -n "$HOST_MODEL_PATH" ]] || { echo "missing argument: --host-model-path" >&2; exit 2; }
+[[ -n "$CONTAINER_MODEL_PATH" ]] || { echo "missing argument: --container-model-path" >&2; exit 2; }
 resolve_runtime_config
 validate_prefix "$CONTAINER_PREFIX"
 
@@ -133,11 +141,10 @@ remote_run="docker run -itd --name=$CONTAINER_NAME \
   --ulimit stack=-1:-1 --ulimit memlock=-1:-1 \
   -v ${HOST_HOME_ROOT}:/mnt \
   -v /module/:/module:ro \
-  -v /public/opendas/DL_DATA/llm-models/:/model:ro \
-  -v /public4/share/:/model1:ro \
-  -v /public4/opendas/DL_DATA/:/model2:ro \
+  -v ${HOST_MODEL_PATH}:${CONTAINER_MODEL_PATH}:ro \
   -v /opt/hyhal:/opt/hyhal:ro \
   $IMAGE bash"
+remote_model_check="docker exec $CONTAINER_NAME test -d $(printf '%q' "$CONTAINER_MODEL_PATH")"
 
 echo "CONTAINER_NAME=$CONTAINER_NAME"
 echo "CONTAINER_PREFIX=$CONTAINER_PREFIX"
@@ -147,6 +154,7 @@ echo "IMAGE_PREFIX=$IMAGE_PREFIX"
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
   printf 'ssh %q %q\n' "$NODE" "$remote_check"
   printf 'ssh %q %q\n' "$NODE" "$remote_run"
+  printf 'ssh %q %q\n' "$NODE" "$remote_model_check"
   exit 0
 fi
 
@@ -155,4 +163,13 @@ if ssh "$NODE" "$remote_check" >/dev/null 2>&1; then
   exit 1
 fi
 
-ssh "$NODE" "$remote_run"
+CONTAINER_ID="$(ssh "$NODE" "$remote_run")"
+echo "CONTAINER_ID=$CONTAINER_ID"
+if ! ssh "$NODE" "$remote_model_check"; then
+  echo "CONTAINER_MODEL_PATH_MISSING=$CONTAINER_MODEL_PATH" >&2
+  echo "STOP_NEW_CONTAINER_AFTER_MODEL_CHECK_FAILURE=$CONTAINER_NAME" >&2
+  ssh "$NODE" "docker stop $(printf '%q' "$CONTAINER_NAME")" >/dev/null 2>&1 || \
+    echo "WARN_STOP_NEW_CONTAINER_FAILED=$CONTAINER_NAME" >&2
+  exit 1
+fi
+echo "CONTAINER_MODEL_PATH_OK=$CONTAINER_MODEL_PATH"

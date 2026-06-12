@@ -1,8 +1,8 @@
 task:
-  name: glm47_vllm018_mooncake_1p1d_custom_smoke
+  name: glm47_vllm018_mooncake_1p1d_custom_32k1k_bs1
   run_id: auto
   owner: liuzhihuan
-  description: GLM-4.7-W8A8 vLLM 0.18.1 + Mooncake 1P1D custom smoke
+  description: GLM-4.7 vLLM 0.18 Mooncake 1P1D 32k input 1k output bs1 smoke
 
 mode: pd
 
@@ -19,9 +19,9 @@ pd:
       port: 9348
       transfer_port: 8998
     decode:
-      node: 10.16.1.44
-      service_ip: 13.13.1.44
-      vllm_host_ip: 13.13.1.44
+      node: 10.16.1.42
+      service_ip: 13.13.1.42
+      vllm_host_ip: 13.13.1.42
       port: 9349
   proxy:
     node_role: prefill
@@ -30,8 +30,8 @@ pd:
 test:
   mode: custom
   params:
-    input_lens: [512]
-    output_len: 32
+    input_lens: [32768]
+    output_len: 1024
     concurrencies: [1]
     num_prompts_mult: 1
     request_rate: null

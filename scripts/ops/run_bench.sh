@@ -5,7 +5,8 @@ usage() {
   cat <<'USAGE'
 Usage:
   run_bench.sh --node NODE --container NAME --test-mode custom|pchit \
-    --served-model-id ID --port PORT --tp TP --work-dir WORK_DIR [--state STATE]
+    --served-model-id ID --port PORT --tp TP --work-dir WORK_DIR [--state STATE] \
+    --prefill-log LOG --decode-log LOG [--bench-timeout SECONDS]
 
 Options:
   --dry-run
@@ -68,7 +69,7 @@ PY
 run_in_container() {
   local script="$1"
   local docker_cmd
-  docker_cmd="docker exec -i -w $(quote_sh "$SKILL_CONTAINER_ROOT") $(quote_sh "$CONTAINER") bash -ic 'tmp=/tmp/vllm_ops_bench_\$\$.sh; cat > \"\$tmp\"; bash \"\$tmp\"; rc=\$?; rm -f \"\$tmp\"; exit \$rc'"
+  docker_cmd="docker exec -i -w $(quote_sh "$SKILL_CONTAINER_ROOT") $(quote_sh "$CONTAINER") bash -lc 'tmp=/tmp/vllm_ops_bench_\$\$.sh; cat > \"\$tmp\"; bash \"\$tmp\"; rc=\$?; rm -f \"\$tmp\"; exit \$rc'"
   if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "DRY_RUN: benchmark in container"
     printf 'ssh %q %q\n' "$NODE" "$docker_cmd"
@@ -87,6 +88,9 @@ PORT=""
 TP=""
 WORK_DIR=""
 STATE=""
+PREFILL_LOG=""
+DECODE_LOG=""
+BENCH_TIMEOUT="3600"
 DRY_RUN="${DRY_RUN:-0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -114,19 +118,23 @@ while [[ $# -gt 0 ]]; do
     --tp) TP="$2"; shift 2 ;;
     --work-dir) WORK_DIR="$2"; shift 2 ;;
     --state) STATE="$2"; shift 2 ;;
+    --prefill-log) PREFILL_LOG="$2"; shift 2 ;;
+    --decode-log) DECODE_LOG="$2"; shift 2 ;;
+    --bench-timeout) BENCH_TIMEOUT="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
 
-for var in NODE CONTAINER TEST_MODE SERVED_MODEL_ID PORT TP WORK_DIR; do
+for var in NODE CONTAINER TEST_MODE SERVED_MODEL_ID PORT TP WORK_DIR PREFILL_LOG DECODE_LOG BENCH_TIMEOUT; do
   [[ -n "${!var}" ]] || { echo "missing argument: ${var}" >&2; exit 2; }
 done
 [[ "$TEST_MODE" == "custom" || "$TEST_MODE" == "pchit" ]] || {
   echo "unsupported PD benchmark mode: $TEST_MODE (expected custom or pchit)" >&2
   exit 2
 }
+[[ "$BENCH_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || { echo "invalid_bench_timeout=$BENCH_TIMEOUT" >&2; exit 2; }
 
 resolve_runtime_config
 [[ -n "$STATE" ]] || STATE="${WORK_DIR}/state.json"
@@ -177,6 +185,9 @@ CSV_FILE=$(quote_sh "$CSV_FILE")
 CSV_FILE_HOST=$(quote_sh "$CSV_FILE_HOST")
 PCHIT_JSON_FILE=$(quote_sh "$PCHIT_JSON_FILE")
 PCHIT_JSON_FILE_HOST=$(quote_sh "$PCHIT_JSON_FILE_HOST")
+PREFILL_LOG=$(quote_sh "$PREFILL_LOG")
+DECODE_LOG=$(quote_sh "$DECODE_LOG")
+BENCH_TIMEOUT=$(quote_sh "$BENCH_TIMEOUT")
 ENV_CHECK_LOG="\$WORK_DIR/logs/bench-env-check.log"
 
 restore_work_dir_permissions() {
@@ -199,6 +210,10 @@ export MODEL_PATH=$(quote_sh "$SERVED_MODEL_ID")
 export PORT=$(quote_sh "$PORT")
 export TP=$(quote_sh "$TP")
 export WORK_DIR="\$WORK_DIR"
+export STATE="\$STATE"
+export PREFILL_LOG="\$PREFILL_LOG"
+export DECODE_LOG="\$DECODE_LOG"
+export BENCH_TIMEOUT="\$BENCH_TIMEOUT"
 ${env_exports}
 
 python3 "\$PWD/scripts/ops/update_state.py" --state "\$STATE" \
@@ -246,7 +261,19 @@ fi
 bench_ok=0
 if [[ "\$TEST_MODE" == "pchit" ]]; then
   concurrency_list="\$(printf '%s' "\${BATCHES:-1 2 3 4 5 6 7 8}" | tr ',' ' ')"
-  if python3 scripts/client-scripts/prefix_cache_benchmark.py \
+  if python3 scripts/ops/bench_watchdog.py \
+    --state "\$STATE" \
+    --log-file "\$WORK_DIR/logs/pchit-watchdog.log" \
+    --result-file "\$WORK_DIR/logs/pchit-watchdog.json" \
+    --prefill-log "\$PREFILL_LOG" \
+    --decode-log "\$DECODE_LOG" \
+    --timeout "\$BENCH_TIMEOUT" \
+    --heartbeat-interval 30 \
+    --input-len "\${INPUT_LEN:?missing INPUT_LEN}" \
+    --output-len "\${OUTPUT_LEN:?missing OUTPUT_LEN}" \
+    --concurrency 0 \
+    --num-prompts 0 \
+    -- python3 scripts/client-scripts/prefix_cache_benchmark.py \
     --mode "\${PCHIT_BENCHMARK_MODE:-fixed}" \
     --base-url "http://127.0.0.1:\${PORT}" \
     --model "\$BENCH_MODEL_ID" \
@@ -273,10 +300,22 @@ else
 fi
 
 if [[ "\$bench_ok" != "1" ]]; then
-  python3 "\$PWD/scripts/ops/update_state.py" --state "\$STATE" \
-    --set "status=BENCH_FAILED" \
-    --set "test.status=FAILED" \
-    --set "failure.reason=bench_script_failed"
+  EXISTING_REASON=\$(python3 - "\$STATE" <<'PY'
+import json
+import sys
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8-sig"))
+    print(((data.get("failure") or {}).get("reason")) or "")
+except Exception:
+    print("")
+PY
+)
+  if [[ -z "\$EXISTING_REASON" ]]; then
+    python3 "\$PWD/scripts/ops/update_state.py" --state "\$STATE" \
+      --set "status=BENCH_FAILED" \
+      --set "test.status=FAILED" \
+      --set "failure.reason=bench_script_failed"
+  fi
   exit 1
 fi
 
@@ -292,6 +331,7 @@ fi
 python3 "\$PWD/scripts/ops/update_state.py" --state "\$STATE" \
   --set "status=BENCH_DONE" \
   --set "test.status=COMPLETED" \
+  --set "test.current_case=null" \
   --set "paths.csv_file=\$CSV_FILE" \
   --set "paths.csv_file_container=\$CSV_FILE" \
   --set "paths.csv_file_host=\$CSV_FILE_HOST" \

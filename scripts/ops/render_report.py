@@ -201,6 +201,10 @@ def state_is_failure(state):
         "SERVICE_TIMEOUT",
         "SERVICE_PROCESS_MISSING",
         "SERVICE_PORT_MISMATCH",
+        "TASK_FAILED",
+        "RUNTIME_FAILED",
+        "PROXY_FAILED",
+        "PROXY_TIMEOUT",
         "BENCH_FAILED",
         "STOP_FAILED",
     }:
@@ -255,9 +259,12 @@ def main():
         "status": final_status,
         "node": state.get("node"),
         "image": state.get("image"),
+        "image_ref": state.get("image_ref"),
+        "image_ids": state.get("image_ids", {}),
         "container": state.get("container", {}),
         "model": state.get("model", {}),
         "pd": state.get("pd", {}),
+        "cleanup": state.get("cleanup", {}),
         "deployment": {
             "status": "FAIL" if state_is_failure(state) else "PASS",
             "startup_duration_seconds": deep_get(state, "timing.startup_duration_seconds"),
@@ -271,6 +278,10 @@ def main():
         "test": {
             "mode": deep_get(state, "test.mode"),
             "status": deep_get(state, "test.status", summary["status"]),
+            "current_case": deep_get(state, "test.current_case"),
+            "heartbeat_at": deep_get(state, "test.heartbeat_at"),
+            "elapsed_seconds": deep_get(state, "test.elapsed_seconds"),
+            "bench_timeout_seconds": deep_get(state, "test.bench_timeout_seconds"),
             "csv_file": None if csv_missing else str(csv_file),
             "csv_missing": csv_missing,
             "pchit_json_file": deep_get(state, "paths.pchit_json_file_host")
@@ -315,13 +326,83 @@ def main():
         "- container_model_path: `{}`".format(deep_get(state, "model.container_model_path")),
         "- served_model_id: `{}`".format(deep_get(state, "model.served_model_id")),
         "- bench_model_id: `{}`".format(deep_get(state, "model.bench_model_id")),
+        "- bench_model_id_source: `{}`".format(
+            deep_get(state, "model.bench_model_id_source")
+        ),
+        "- 镜像: `{}`".format(state.get("image_ref") or state.get("image")),
+        "- Prefill image id: `{}`".format(deep_get(state, "image_ids.prefill")),
+        "- Decode image id: `{}`".format(deep_get(state, "image_ids.decode")),
+        "- Prefill Mooncake runtime: status=`{}` version=`{}` log=`{}`".format(
+            deep_get(state, "pd.runtime.prefill.status"),
+            deep_get(state, "pd.runtime.prefill.mooncake_version"),
+            deep_get(state, "pd.runtime.prefill.log_file"),
+        ),
+        "- Decode Mooncake runtime: status=`{}` version=`{}` log=`{}`".format(
+            deep_get(state, "pd.runtime.decode.status"),
+            deep_get(state, "pd.runtime.decode.mooncake_version"),
+            deep_get(state, "pd.runtime.decode.log_file"),
+        ),
+        "- Mooncake destination affinity: `{}`".format(
+            deep_get(state, "pd.runtime.mooncake_dest_device_affinity")
+        ),
+        "- Transfer: status=`{}` protocol=`{}` failure=`{}`".format(
+            deep_get(state, "pd.transfer.status"),
+            deep_get(state, "pd.transfer.protocol"),
+            deep_get(state, "pd.transfer.failure_reason"),
+        ),
+        "- Transfer HCA: prefill=`{}` decode=`{}`".format(
+            deep_get(state, "pd.transfer.prefill.detected_hcas"),
+            deep_get(state, "pd.transfer.decode.detected_hcas"),
+        ),
+        "- Benchmark: status=`{}` case=`{}` heartbeat=`{}` elapsed=`{}` timeout=`{}`".format(
+            deep_get(state, "test.status"),
+            deep_get(state, "test.current_case"),
+            deep_get(state, "test.heartbeat_at"),
+            deep_get(state, "test.elapsed_seconds"),
+            deep_get(state, "test.bench_timeout_seconds"),
+        ),
+        "- Prefill: node=`{}` container=`{}` port=`{}` transfer_port=`{}` status=`{}`".format(
+            deep_get(state, "pd.roles.prefill.node"),
+            deep_get(state, "pd.roles.prefill.container"),
+            deep_get(state, "pd.roles.prefill.port"),
+            deep_get(state, "pd.roles.prefill.transfer_port"),
+            deep_get(state, "pd.roles.prefill.status"),
+        ),
+        "- Decode: node=`{}` container=`{}` port=`{}` status=`{}`".format(
+            deep_get(state, "pd.roles.decode.node"),
+            deep_get(state, "pd.roles.decode.container"),
+            deep_get(state, "pd.roles.decode.port"),
+            deep_get(state, "pd.roles.decode.status"),
+        ),
+        "- Proxy: node=`{}` container=`{}` port=`{}` status=`{}`".format(
+            deep_get(state, "pd.proxy.node"),
+            deep_get(state, "pd.proxy.container"),
+            deep_get(state, "pd.proxy.port"),
+            deep_get(state, "pd.proxy.status"),
+        ),
+        "- Proxy listener/upstream/bootstrap/smoke: `{}` / `{}` / `{}` / `{}`".format(
+            deep_get(state, "pd.proxy.listener.status"),
+            "{}/{}".format(
+                deep_get(state, "pd.proxy.upstream.prefill.status"),
+                deep_get(state, "pd.proxy.upstream.decode.status"),
+            ),
+            deep_get(state, "pd.proxy.bootstrap.status"),
+            deep_get(state, "pd.proxy.smoke.status"),
+        ),
+        "- Cleanup policy: `{}` containers_preserved=`{}`".format(
+            deep_get(state, "cleanup.policy"),
+            deep_get(state, "cleanup.containers_preserved"),
+        ),
         "- 启动耗时秒: {}".format(deep_get(state, "timing.startup_duration_seconds")),
         "- 就绪耗时秒: {}".format(deep_get(state, "timing.readiness_duration_seconds")),
         "- 停止时间戳: {}".format(deep_get(state, "timing.stop_epoch")),
         "- 端口已释放: {}".format(deep_get(state, "service.port_released")),
         "- 工作目录(宿主机): `{}`".format(deep_get(state, "paths.work_dir_host")),
         "- 工作目录(容器): `{}`".format(work_dir_container),
-        "- CSV: `{}`".format("missing" if csv_missing else csv_file),
+        "- CSV expected: `{}`".format(
+            deep_get(state, "paths.csv_file_host") or args.csv or ""
+        ),
+        "- CSV generated: `{}`".format("missing" if csv_missing else csv_file),
         "- 日志: `{}`".format(log_file),
         "- 场景数: {}".format(summary["total_scenarios"]),
         "- 通过: {}".format(summary["passed"]),

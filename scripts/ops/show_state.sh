@@ -55,6 +55,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$STATE" ]] || { echo "missing_arg=--state" >&2; exit 2; }
+
+# An absolute state path already contains enough information for local reads.
+# Infer the remote runtime user when the path follows the standard home layout.
+if [[ -z "$SKILL_USER" && "$STATE" =~ ^/public2?/home/([^/]+)/ ]]; then
+  SKILL_USER="${BASH_REMATCH[1]}"
+fi
+if [[ -z "$SKILL_USER" && -z "$NODE" ]]; then
+  LOCAL_ARGS=()
+  [[ "$FULL" == "1" ]] && LOCAL_ARGS+=(--full)
+  python3 "$SCRIPT_DIR/show_state.py" --state "$STATE" "${LOCAL_ARGS[@]}"
+  exit $?
+fi
 resolve_runtime_config
 STATE_HOST="$(state_host_path "$STATE")"
 

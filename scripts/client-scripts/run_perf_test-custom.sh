@@ -106,6 +106,7 @@ for input_len in $INPUT_LENS; do
     for concurrency in $CONCURRENCIES; do
         num_prompts=$((concurrency * NUM_PROMPTS_MULT))
         log_file="${LOG_DIR}/${model}-in${input_len}-out${OUTPUT_LEN}-c${concurrency}-n${num_prompts}.log"
+        watchdog_result="${log_file}.watchdog.json"
 
         echo "BENCH_CASE_START input=${input_len} output=${OUTPUT_LEN} concurrency=${concurrency} num_prompts=${num_prompts}"
 
@@ -128,8 +129,29 @@ for input_len in $INPUT_LENS; do
             cmd+=(--request-rate "$REQUEST_RATE")
         fi
 
-        "${cmd[@]}" 2>&1 | tee "$log_file"
-        bench_rc=${PIPESTATUS[0]}
+        python3 scripts/ops/bench_watchdog.py \
+            --state "${STATE:?missing STATE}" \
+            --log-file "$log_file" \
+            --result-file "$watchdog_result" \
+            --prefill-log "${PREFILL_LOG:?missing PREFILL_LOG}" \
+            --decode-log "${DECODE_LOG:?missing DECODE_LOG}" \
+            --timeout "${BENCH_TIMEOUT:-3600}" \
+            --heartbeat-interval 30 \
+            --input-len "$input_len" \
+            --output-len "$OUTPUT_LEN" \
+            --concurrency "$concurrency" \
+            --num-prompts "$num_prompts" \
+            -- "${cmd[@]}"
+        bench_rc=$?
+        watchdog_reason=$(python3 - "$watchdog_result" <<'PY'
+import json
+import sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("reason") or "")
+except Exception:
+    print("")
+PY
+)
 
         Benchmark_duration=$(metric_value "^Benchmark duration" 4 "$log_file")
         request_rate=$(metric_value "^Traffic request rate" 4 "$log_file")
@@ -156,7 +178,7 @@ for input_len in $INPUT_LENS; do
 
         if [[ "$bench_rc" != "0" ]]; then
             status="FAIL"
-            error_reason="bench_exit_nonzero"
+            error_reason="${watchdog_reason:-bench_exit_nonzero}"
             overall_rc=1
         elif [[ -n "$successful" && "$successful" == "0" && -n "$failed" && "$failed" != "0" ]]; then
             status="FAIL"

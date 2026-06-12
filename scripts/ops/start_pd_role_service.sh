@@ -4,39 +4,50 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  start_pd_role_service.sh --role prefill|decode --node NODE --container NAME \
-    --model-name NAME --model-short SHORT --container-model-path PATH --host-model-path PATH \
-    --port PORT --tp TP --gpu-range RANGE --work-dir WORK_DIR --state STATE \
+  start_pd_role_service.sh --role prefill|decode --server-script PATH \
+    --node NODE --container NAME --model-name NAME --model-short SHORT \
+    --container-model-path PATH --host-model-path PATH --port PORT --tp TP \
+    --gpu-range RANGE --work-dir WORK_DIR --state STATE \
     [--transfer-port PORT] [--vllm-host-ip IP] [--network-ifname IFNAME] \
-    [--nccl-ib-hca HCA] [--extra-args ARGS] [--dry-run]
+    [--nccl-ib-hca HCA] [--mooncake-dest-device-affinity 0|1] \
+    [--extra-args ARGS] [--dry-run]
 USAGE
 }
+
 quote_sh() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
 run_in_container() {
   local script="$1" docker_cmd
-  docker_cmd="docker exec -i -w $(quote_sh "$SKILL_CONTAINER_ROOT") $(quote_sh "$CONTAINER") bash -ic 'tmp=/tmp/vllm_pd_role_\$\$.sh; cat > \"\$tmp\"; bash \"\$tmp\"; rc=\$?; rm -f \"\$tmp\"; exit \$rc'"
+  docker_cmd="docker exec -i -w $(quote_sh "$SKILL_CONTAINER_ROOT") $(quote_sh "$CONTAINER") bash -lc 'tmp=/tmp/vllm_pd_role_\$\$.sh; cat > \"\$tmp\"; bash \"\$tmp\"; rc=\$?; rm -f \"\$tmp\"; exit \$rc'"
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "即将在容器内启动 PD ${ROLE} 服务:"
+    echo "DRY_RUN_ROLE=$ROLE"
     printf 'ssh %q %q\n' "$NODE" "$docker_cmd"
     echo "--- container script ---"
     printf '%s\n' "$script"
-  else
-    printf '%s\n' "$script" | ssh "$NODE" "$docker_cmd"
+    return 0
   fi
+  printf '%s\n' "$script" | ssh "$NODE" "$docker_cmd"
 }
-ROLE=""; NODE=""; CONTAINER=""; MODEL_NAME=""; MODEL_SHORT=""; CONTAINER_MODEL_PATH=""; HOST_MODEL_PATH=""
-PORT=""; TRANSFER_PORT=""; TP=""; GPU_RANGE="0,1,2,3,4,5,6,7"; WORK_DIR=""; STATE=""; VLLM_HOST_IP=""; NETWORK_IFNAME=""; NCCL_IB_HCA=""
-QUANTIZATION="slimquant_marlin"; DTYPE="bfloat16"; MAX_NUM_BATCHED_TOKENS="16384"; MAX_NUM_SEQS=""; GPU_MEMORY_UTILIZATION=""; MAX_MODEL_LEN=""; EXTRA_ARGS=""
-SPECULATIVE_CONFIG='{"method": "mtp", "num_speculative_tokens": 2, "quantization": "slimquant_marlin"}'
-COMPILATION_CONFIG='{"cudagraph_mode": "PIECEWISE"}'
-DRY_RUN=0
+
+ROLE=""; SERVER_SCRIPT_REL=""; NODE=""; CONTAINER=""; MODEL_NAME=""; MODEL_SHORT=""
+CONTAINER_MODEL_PATH=""; HOST_MODEL_PATH=""; PORT=""; TRANSFER_PORT=""; TP=""
+GPU_RANGE="0,1,2,3,4,5,6,7"; WORK_DIR=""; STATE=""; VLLM_HOST_IP=""
+NETWORK_IFNAME=""; NCCL_IB_HCA=""; QUANTIZATION="slimquant_marlin"; DTYPE="bfloat16"
+MOONCAKE_DEST_DEVICE_AFFINITY="1"
+MAX_NUM_BATCHED_TOKENS="16384"; MAX_NUM_SEQS=""; GPU_MEMORY_UTILIZATION=""; MAX_MODEL_LEN=""
+EXTRA_ARGS=""; SPECULATIVE_CONFIG='{"method": "mtp", "num_speculative_tokens": 2, "quantization": "slimquant_marlin"}'
+COMPILATION_CONFIG='{"cudagraph_mode": "PIECEWISE"}'; DRY_RUN=0
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/runtime_config.sh"
-SKILL_USER=""; USER_ABBR=""; HOME_ROOT=""; HOST_HOME_ROOT=""; SKILL_HOST_ROOT=""; OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-}"; OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-}"; CONTAINER_PREFIX=""
+SKILL_USER=""; USER_ABBR=""; HOME_ROOT=""; HOST_HOME_ROOT=""; SKILL_HOST_ROOT=""
+OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-}"; OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-}"; CONTAINER_PREFIX=""
+
 while [[ $# -gt 0 ]]; do
   if runtime_config_parse_common_arg "$1" "${2-}"; then shift 2; continue; fi
   case "$1" in
     --role) ROLE="$2"; shift 2 ;;
+    --server-script) SERVER_SCRIPT_REL="$2"; shift 2 ;;
     --node) NODE="$2"; shift 2 ;;
     --container) CONTAINER="$2"; shift 2 ;;
     --model-name) MODEL_NAME="$2"; shift 2 ;;
@@ -52,6 +63,7 @@ while [[ $# -gt 0 ]]; do
     --vllm-host-ip) VLLM_HOST_IP="$2"; shift 2 ;;
     --network-ifname) NETWORK_IFNAME="$2"; shift 2 ;;
     --nccl-ib-hca) NCCL_IB_HCA="$2"; shift 2 ;;
+    --mooncake-dest-device-affinity) MOONCAKE_DEST_DEVICE_AFFINITY="$2"; shift 2 ;;
     --quantization) QUANTIZATION="$2"; shift 2 ;;
     --dtype) DTYPE="$2"; shift 2 ;;
     --max-num-batched-tokens) MAX_NUM_BATCHED_TOKENS="$2"; shift 2 ;;
@@ -63,81 +75,70 @@ while [[ $# -gt 0 ]]; do
     --extra-args) EXTRA_ARGS="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --help) usage; exit 0 ;;
-    *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
+    *) echo "unknown_arg=$1" >&2; usage; exit 2 ;;
   esac
 done
-for var in ROLE NODE CONTAINER MODEL_NAME MODEL_SHORT CONTAINER_MODEL_PATH PORT TP WORK_DIR STATE; do
-  [[ -n "${!var}" ]] || { echo "missing argument: $var" >&2; exit 2; }
+
+for var in ROLE SERVER_SCRIPT_REL NODE CONTAINER MODEL_NAME MODEL_SHORT CONTAINER_MODEL_PATH PORT TP WORK_DIR STATE VLLM_HOST_IP; do
+  [[ -n "${!var}" ]] || { echo "missing_arg=$var" >&2; exit 2; }
 done
-[[ "$ROLE" == "prefill" || "$ROLE" == "decode" ]] || { echo "--role must be prefill or decode" >&2; exit 2; }
+[[ "$ROLE" == "prefill" || "$ROLE" == "decode" ]] || { echo "invalid_role=$ROLE" >&2; exit 2; }
+[[ "$ROLE" != "prefill" || -n "$TRANSFER_PORT" ]] || { echo "missing_arg=TRANSFER_PORT" >&2; exit 2; }
+[[ "$MOONCAKE_DEST_DEVICE_AFFINITY" == "0" || "$MOONCAKE_DEST_DEVICE_AFFINITY" == "1" ]] || { echo "invalid_mooncake_dest_device_affinity=$MOONCAKE_DEST_DEVICE_AFFINITY" >&2; exit 2; }
 resolve_runtime_config
-KV_ROLE="kv_consumer"; ENFORCE_EAGER=0
-if [[ "$ROLE" == "prefill" ]]; then
-  KV_ROLE="kv_producer"
-  ENFORCE_EAGER=1
-  TRANSFER_PORT="${TRANSFER_PORT:-8998}"
-fi
+
+SERVER_SCRIPT="${SKILL_CONTAINER_ROOT%/}/${SERVER_SCRIPT_REL#./}"
+KV_ROLE="kv_consumer"; [[ "$ROLE" == "prefill" ]] && KV_ROLE="kv_producer"
 LOG="${WORK_DIR}/logs/${MODEL_SHORT}-${ROLE}-vllm-server.log"
 PID="${WORK_DIR}/logs/${MODEL_SHORT}-${ROLE}-vllm-server.pid"
+
 remote_script=$(cat <<EOF
 set -euo pipefail
-ROLE=$(quote_sh "$ROLE"); KV_ROLE=$(quote_sh "$KV_ROLE"); MODEL_PATH=$(quote_sh "$CONTAINER_MODEL_PATH")
+ROLE=$(quote_sh "$ROLE"); KV_ROLE=$(quote_sh "$KV_ROLE"); SERVER_SCRIPT=$(quote_sh "$SERVER_SCRIPT"); MODEL_PATH=$(quote_sh "$CONTAINER_MODEL_PATH")
 MODEL_NAME=$(quote_sh "$MODEL_NAME"); MODEL_SHORT=$(quote_sh "$MODEL_SHORT"); HOST_MODEL_PATH=$(quote_sh "$HOST_MODEL_PATH")
-PORT=$(quote_sh "$PORT"); TP=$(quote_sh "$TP"); GPU_RANGE=$(quote_sh "$GPU_RANGE"); WORK_DIR=$(quote_sh "$WORK_DIR"); STATE=$(quote_sh "$STATE")
-LOG=$(quote_sh "$LOG"); PID=$(quote_sh "$PID"); VLLM_HOST_IP=$(quote_sh "$VLLM_HOST_IP"); NETWORK_IFNAME=$(quote_sh "$NETWORK_IFNAME"); NCCL_IB_HCA=$(quote_sh "$NCCL_IB_HCA")
-QUANTIZATION=$(quote_sh "$QUANTIZATION"); DTYPE=$(quote_sh "$DTYPE"); MAX_NUM_BATCHED_TOKENS=$(quote_sh "$MAX_NUM_BATCHED_TOKENS"); MAX_NUM_SEQS=$(quote_sh "$MAX_NUM_SEQS")
-GPU_MEMORY_UTILIZATION=$(quote_sh "$GPU_MEMORY_UTILIZATION"); MAX_MODEL_LEN=$(quote_sh "$MAX_MODEL_LEN"); SPECULATIVE_CONFIG=$(quote_sh "$SPECULATIVE_CONFIG"); COMPILATION_CONFIG=$(quote_sh "$COMPILATION_CONFIG")
-TRANSFER_PORT=$(quote_sh "$TRANSFER_PORT"); EXTRA_ARGS=$(quote_sh "$EXTRA_ARGS")
-ENFORCE_EAGER=$(quote_sh "$ENFORCE_EAGER"); SKILL_CONTAINER_ROOT=$(quote_sh "$SKILL_CONTAINER_ROOT")
-mkdir -p "\$WORK_DIR/logs"; rm -f "\$LOG" "\$PID"; START_TS=\$(date +%s)
+PORT=$(quote_sh "$PORT"); TRANSFER_PORT=$(quote_sh "$TRANSFER_PORT"); TP=$(quote_sh "$TP"); GPU_RANGE=$(quote_sh "$GPU_RANGE")
+WORK_DIR=$(quote_sh "$WORK_DIR"); STATE=$(quote_sh "$STATE"); LOG=$(quote_sh "$LOG"); PID=$(quote_sh "$PID")
+VLLM_HOST_IP=$(quote_sh "$VLLM_HOST_IP"); NETWORK_IFNAME=$(quote_sh "$NETWORK_IFNAME"); NCCL_IB_HCA=$(quote_sh "$NCCL_IB_HCA")
+MOONCAKE_DEST_DEVICE_AFFINITY=$(quote_sh "$MOONCAKE_DEST_DEVICE_AFFINITY")
+QUANTIZATION=$(quote_sh "$QUANTIZATION"); DTYPE=$(quote_sh "$DTYPE"); MAX_NUM_BATCHED_TOKENS=$(quote_sh "$MAX_NUM_BATCHED_TOKENS")
+MAX_NUM_SEQS=$(quote_sh "$MAX_NUM_SEQS"); GPU_MEMORY_UTILIZATION=$(quote_sh "$GPU_MEMORY_UTILIZATION"); MAX_MODEL_LEN=$(quote_sh "$MAX_MODEL_LEN")
+SPECULATIVE_CONFIG=$(quote_sh "$SPECULATIVE_CONFIG"); COMPILATION_CONFIG=$(quote_sh "$COMPILATION_CONFIG"); EXTRA_ARGS=$(quote_sh "$EXTRA_ARGS")
+SKILL_CONTAINER_ROOT=$(quote_sh "$SKILL_CONTAINER_ROOT")
+
+mkdir -p "\$WORK_DIR/logs"
+if [[ ! -f "\$SERVER_SCRIPT" ]]; then
+  python3 "\$SKILL_CONTAINER_ROOT/scripts/ops/update_state.py" --state "\$STATE" --set "status=SERVICE_FAILED" --set "pd.roles.\$ROLE.status=FAILED" --set "failure.reason=server_script_missing" --set "failure.detail=\$SERVER_SCRIPT"
+  echo "SERVER_SCRIPT_MISSING=\$SERVER_SCRIPT" >&2
+  exit 1
+fi
+if [[ ! -d "\$MODEL_PATH" ]]; then
+  python3 "\$SKILL_CONTAINER_ROOT/scripts/ops/update_state.py" --state "\$STATE" --set "status=SERVICE_FAILED" --set "pd.roles.\$ROLE.status=FAILED" --set "failure.reason=container_model_path_missing" --set "failure.detail=\$MODEL_PATH"
+  echo "CONTAINER_MODEL_PATH_MISSING=\$MODEL_PATH" >&2
+  exit 1
+fi
+
+rm -f "\$LOG" "\$PID"
+START_TS=\$(date +%s)
 python3 "\$SKILL_CONTAINER_ROOT/scripts/ops/update_state.py" --state "\$STATE" \
-  --set "pd.roles.\$ROLE.status=SERVICE_STARTING" --set "pd.roles.\$ROLE.node=$(printf '%s' "$NODE")" --set "pd.roles.\$ROLE.container=$(printf '%s' "$CONTAINER")" \
+  --set "status=SERVICE_STARTING" --set "pd.roles.\$ROLE.status=SERVICE_STARTING" \
+  --set "pd.roles.\$ROLE.node=$(printf '%s' "$NODE")" --set "pd.roles.\$ROLE.container=$(printf '%s' "$CONTAINER")" \
   --set "pd.roles.\$ROLE.port=\$PORT" --set "pd.roles.\$ROLE.kv_role=\$KV_ROLE" --set "pd.roles.\$ROLE.vllm_host_ip=\$VLLM_HOST_IP" \
-  --set "pd.roles.\$ROLE.transfer_port=\$TRANSFER_PORT" \
-  --set "pd.roles.\$ROLE.network_ifname=\$NETWORK_IFNAME" --set "pd.roles.\$ROLE.nccl_ib_hca=\$NCCL_IB_HCA" --set "pd.roles.\$ROLE.log_file=\$LOG" --set "pd.roles.\$ROLE.pid_file=\$PID" \
-  --set "model.name=\$MODEL_NAME" --set "model.model_short=\$MODEL_SHORT" --set "model.host_model_path=\$HOST_MODEL_PATH" --set "model.container_model_path=\$MODEL_PATH" \
-  --set "paths.work_dir=\$WORK_DIR" --set "paths.work_dir_container=\$WORK_DIR" --set "paths.state_file=\$STATE" --set "paths.state_file_container=\$STATE"
-export KV_ROLE="\$KV_ROLE"
-export VLLM_TORCH_PROFILER_DIR=./prof-0509
-export HIP_VISIBLE_DEVICES="\$GPU_RANGE"
-export NCCL_MIN_NCHANNELS=16
-export NCCL_MAX_NCHANNELS=16
-export NCCL_P2P_NVL_CHUNKSIZE=131072
-export VLLM_RPC_TIMEOUT=1800000
-export VLLM_USE_AITER_MOE_W8A8=0
-export MC_ENABLE_DEST_DEVICE_AFFINITY=1
-export VLLM_HCU_USE_FUSED_RMS_QUANT=1
-export VLLM_HCU_USE_FUSED_SILU_MUL_QUANT=1
-export VLLM_HCU_USE_FUSED_QKV_SPLIT_RMS_ROPE_KVSTORE=1
-export VLLM_HCU_USE_CUSTOM_FLASH_ATTN=1
-export VLLM_HOST_IP="\$VLLM_HOST_IP"
-export NCCL_IB_HCA="\$NCCL_IB_HCA"
-export NCCL_SOCKET_IFNAME="\$NETWORK_IFNAME"
-export GLOO_SOCKET_IFNAME="\$NETWORK_IFNAME"
-if [[ "\$ROLE" == "prefill" && -n "\$TRANSFER_PORT" ]]; then
-  export VLLM_MOONCAKE_BOOTSTRAP_PORT="\$TRANSFER_PORT"
-fi
-KV_TRANSFER_CONFIG=\$(python3 - <<PY
-import json, os
-print(json.dumps({"kv_connector": "MooncakeConnector", "kv_role": os.environ["KV_ROLE"]}))
-PY
-)
-cmd=(vllm serve "\$MODEL_PATH" --kv-transfer-config "\$KV_TRANSFER_CONFIG" -tp "\$TP" -q "\$QUANTIZATION" --disable-cascade-attn --port "\$PORT" --dtype "\$DTYPE" --speculative_config "\$SPECULATIVE_CONFIG" --compilation-config "\$COMPILATION_CONFIG" --max_num_batched_tokens "\$MAX_NUM_BATCHED_TOKENS")
-if [[ "\$ENFORCE_EAGER" == "1" ]]; then cmd+=(--enforce-eager); fi
-if [[ -n "\$MAX_NUM_SEQS" ]]; then cmd+=(--max-num-seqs "\$MAX_NUM_SEQS"); fi
-if [[ -n "\$MAX_MODEL_LEN" ]]; then cmd+=(--max-model-len "\$MAX_MODEL_LEN"); fi
-if [[ -n "\$GPU_MEMORY_UTILIZATION" ]]; then cmd+=(--gpu-memory-utilization "\$GPU_MEMORY_UTILIZATION"); fi
-if [[ -n "\$EXTRA_ARGS" ]]; then
-  # EXTRA_ARGS is a trusted profile escape hatch for simple space-separated vLLM flags.
-  read -r -a extra_argv <<< "\$EXTRA_ARGS"
-  cmd+=("\${extra_argv[@]}")
-fi
+  --set "pd.roles.\$ROLE.transfer_port=\$TRANSFER_PORT" --set "pd.roles.\$ROLE.network_ifname=\$NETWORK_IFNAME" \
+  --set "pd.roles.\$ROLE.nccl_ib_hca=\$NCCL_IB_HCA" --set "pd.roles.\$ROLE.server_script=\$SERVER_SCRIPT" \
+  --set "pd.roles.\$ROLE.mooncake_dest_device_affinity=\$MOONCAKE_DEST_DEVICE_AFFINITY" \
+  --set "pd.roles.\$ROLE.log_file=\$LOG" --set "pd.roles.\$ROLE.pid_file=\$PID" \
+  --set "model.name=\$MODEL_NAME" --set "model.model_short=\$MODEL_SHORT" \
+  --set "model.host_model_path=\$HOST_MODEL_PATH" --set "model.container_model_path=\$MODEL_PATH"
+
+cmd=(bash "\$SERVER_SCRIPT" --model-path "\$MODEL_PATH" --port "\$PORT" --vllm-host-ip "\$VLLM_HOST_IP" --gpu-range "\$GPU_RANGE" --tp "\$TP" --network-ifname "\$NETWORK_IFNAME" --nccl-ib-hca "\$NCCL_IB_HCA" --mooncake-dest-device-affinity "\$MOONCAKE_DEST_DEVICE_AFFINITY" --quantization "\$QUANTIZATION" --dtype "\$DTYPE" --max-num-batched-tokens "\$MAX_NUM_BATCHED_TOKENS" --max-num-seqs "\$MAX_NUM_SEQS" --gpu-memory-utilization "\$GPU_MEMORY_UTILIZATION" --max-model-len "\$MAX_MODEL_LEN" --speculative-config "\$SPECULATIVE_CONFIG" --compilation-config "\$COMPILATION_CONFIG" --extra-args "\$EXTRA_ARGS")
+if [[ "\$ROLE" == "prefill" ]]; then cmd+=(--transfer-port "\$TRANSFER_PORT"); fi
 nohup "\${cmd[@]}" > "\$LOG" 2>&1 &
 echo \$! > "\$PID"
 python3 "\$SKILL_CONTAINER_ROOT/scripts/ops/update_state.py" --state "\$STATE" --set "pd.roles.\$ROLE.status=SERVICE_STARTED" --set "pd.roles.\$ROLE.pid=\$(cat "\$PID")" --set "pd.roles.\$ROLE.startup_duration_seconds=\$((\$(date +%s) - START_TS))"
 sleep 5
-echo "ROLE=\$ROLE"; echo "LOG_CONTAINER=\$LOG"; echo "PID_CONTAINER=\$PID"; echo "STATE_CONTAINER=\$STATE"; echo "WORK_DIR_CONTAINER=\$WORK_DIR"
+echo "ROLE=\$ROLE"; echo "LOG_CONTAINER=\$LOG"; echo "PID_CONTAINER=\$PID"
 tail -120 "\$LOG" || true
 EOF
 )
+
 run_in_container "$remote_script"

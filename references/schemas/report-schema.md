@@ -1,95 +1,77 @@
-# Report And State Schema
+# State 与报告字段
 
-`run_pd_task.sh` 会持续写入 `state.json`。`render_report.py` 根据 `state.json` 和 benchmark CSV 生成 JSON / Markdown 报告。字段名保持英文，说明使用中文。
+`run_pd_task.sh` 持续更新 `state.json`，`render_report.py` 根据 state 和可选 benchmark CSV 生成 JSON/Markdown 报告。
 
-## 关键 state 字段
+PD 报告包含 `pd.proxy.listener`、`pd.proxy.upstream`、`pd.proxy.bootstrap`、`pd.proxy.smoke` 和 `cleanup`。CSV 路径区分预期路径与实际生成文件。
+
+## 关键字段
 
 ```json
 {
-  "status": "READY | BENCH_DONE | SERVICE_FAILED | SERVICE_TIMEOUT | BENCH_FAILED | STOPPED",
-  "model": {
-    "name": "GLM-4.7-W8A8",
-    "model_short": "glm47int8",
-    "container_model_path": "/model/GLM-4.7-W8A8",
-    "served_model_id": "string",
-    "bench_model_id": "string",
-    "bench_model_id_source": "proxy | decode | config_fallback"
+  "status": "INITIALIZED | RUNTIME_FAILED | SERVICE_FAILED | COMPLETED | TASK_FAILED | STOP_FAILED",
+  "image_ref": "repository:tag",
+  "image_ids": {
+    "prefill": "sha256 without prefix",
+    "decode": "sha256 without prefix"
   },
   "pd": {
-    "backend": "mooncake_vllm018",
-    "topology": "1p1d",
-    "roles": {
+    "runtime": {
+      "mooncake_wheel": "URL or path",
+      "mooncake_dest_device_affinity": true,
       "prefill": {
-        "node": "10.16.1.1",
-        "container": "name",
-        "port": "9348",
-        "transfer_port": "8998",
-        "kv_role": "kv_producer",
-        "vllm_host_ip": "13.13.1.1",
-        "network_ifname": "ens61f0np0",
+        "status": "READY | FAILED",
+        "mooncake_version": "string",
         "log_file": "path",
-        "pid_file": "path"
+        "log_tail": "string"
       },
       "decode": {
-        "node": "10.16.1.44",
-        "container": "name",
-        "port": "9349",
-        "kv_role": "kv_consumer",
-        "vllm_host_ip": "13.13.1.44",
-        "network_ifname": "ens61f0np0",
+        "status": "READY | FAILED",
+        "mooncake_version": "string",
         "log_file": "path",
-        "pid_file": "path"
+        "log_tail": "string"
       }
     },
-    "proxy": {
-      "status": "READY",
-      "node": "10.16.1.1",
-      "container": "name",
-      "port": "8000",
-      "prefill_url": "http://13.13.1.1:9348",
-      "prefill_transfer_port": "8998",
-      "decode_url": "http://13.13.1.44:9349",
-      "served_model_id_source": "unavailable"
+    "roles": {
+      "prefill": {"node": "IP", "container": "name", "port": 9348, "status": "string"},
+      "decode": {"node": "IP", "container": "name", "port": 9349, "status": "string"}
+    },
+    "proxy": {"node": "IP", "container": "name", "port": 8000, "status": "string"},
+    "transfer": {
+      "status": "DISCOVERED | MONITORING | READY | FAILED",
+      "protocol": "rdma",
+      "failure_reason": "string",
+      "prefill": {"detected_hcas": "comma separated", "gid_indices": "comma separated"},
+      "decode": {"detected_hcas": "comma separated", "gid_indices": "comma separated"}
     }
+  },
+  "test": {
+    "status": "RUNNING | COMPLETED | FAILED",
+    "current_case": {"input_len": 32768, "output_len": 1024, "concurrency": 1, "num_prompts": 1},
+    "heartbeat_at": "UTC timestamp",
+    "elapsed_seconds": 30,
+    "bench_timeout_seconds": 3600
+  },
+  "failure": {
+    "stage": "stage name",
+    "reason": "classified reason",
+    "detail": "bounded summary or role",
+    "exit_code": 1
   },
   "paths": {
     "work_dir_host": "path",
     "csv_file_host": "path",
     "report_json_host": "path",
     "report_md_host": "path"
-  },
-  "failure": {
-    "reason": "string",
-    "detail": "string"
   }
 }
 ```
 
-## 状态含义
+## 失败保证
 
-- `READY`：P/D/proxy 已进入可用状态
-- `BENCH_DONE`：benchmark 完成，通常应有 CSV 和报告
-- `SERVICE_FAILED`：preflight、起服、proxy 或 stop 阶段失败
-- `SERVICE_TIMEOUT`：P/D 或 proxy readiness 超时
-- `BENCH_FAILED`：benchmark 阶段失败
-- `STOPPED`：服务停止流程完成
+- 子脚本已写入具体 `failure.reason` 时，主入口不得覆盖。
+- 主入口补充 `failure.stage` 和 `failure.exit_code`。
+- runtime/readiness 日志摘要最多保留约 4000 字节。
+- stop 失败单独写 role 的 `stop_status`，不得覆盖原始服务失败。
+- CSV 不存在时仍应生成失败报告，并标记 CSV 缺失。
 
-## 报告必须包含的信息
-
-最终汇总应覆盖：
-
-- P/D/proxy 容器名、节点、端口和日志路径
-- `state.json`、CSV、JSON report、Markdown report 路径
-- `served_model_id`
-- `bench_model_id` 和 `bench_model_id_source`
-- CSV 存在时的 benchmark 指标摘要
-- 失败时的 `failure.reason` 和 `failure.detail`
-
-## 失败报告
-
-如果任务失败且 CSV 不存在，报告仍应生成，并明确标记失败状态与缺失 CSV。用户调试时优先查看：
-
-- `work_dirs/<run>/state.json`
-- P/D vLLM log
-- Mooncake proxy log
-- JSON / Markdown report
+常见原因包括：`docker_image_not_found`、`docker_image_id_mismatch`、`host_model_path_missing`、`mooncake_transfer_engine_missing`、`mooncake_install_failed`、`python_dependency_missing`、`out_of_memory`、`readiness_timeout`、`mooncake_rdma_transfer_timeout`、`mooncake_kv_pull_failed` 和 `bench_timeout`。

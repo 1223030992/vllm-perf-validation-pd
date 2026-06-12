@@ -4,7 +4,8 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  stop_service.sh --node NODE --container NAME --port PORT [--state STATE] [--dry-run]
+  stop_service.sh --role prefill|decode --node NODE --container NAME --port PORT \
+    [--state STATE] [--preserve-failure] [--restore-permissions-only] [--dry-run]
 
 Stops the container with docker stop, verifies the service port is released, and
 updates state.json when --state is provided. This script never runs docker rm.
@@ -18,7 +19,7 @@ quote_sh() {
 run_in_container() {
   local script="$1"
   local docker_cmd
-  docker_cmd="docker exec -i $(quote_sh "$CONTAINER") bash -ic 'tmp=/tmp/vllm_ops_stop_\$\$.sh; cat > \"\$tmp\"; bash \"\$tmp\"; rc=\$?; rm -f \"\$tmp\"; exit \$rc'"
+  docker_cmd="docker exec -i $(quote_sh "$CONTAINER") bash -lc 'tmp=/tmp/vllm_ops_stop_\$\$.sh; cat > \"\$tmp\"; bash \"\$tmp\"; rc=\$?; rm -f \"\$tmp\"; exit \$rc'"
   if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "DRY_RUN: restore artifact permissions in container:"
     printf 'ssh %q %q\n' "$NODE" "$docker_cmd"
@@ -30,6 +31,7 @@ run_in_container() {
 }
 
 NODE=""
+ROLE=""
 CONTAINER=""
 PORT=""
 STATE=""
@@ -45,6 +47,8 @@ OUTPUT_HOST_ROOT="${OUTPUT_HOST_ROOT:-}"
 OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-}"
 CONTAINER_PREFIX=""
 DRY_RUN="${DRY_RUN:-0}"
+PRESERVE_FAILURE=0
+RESTORE_PERMISSIONS_ONLY=0
 
 while [[ $# -gt 0 ]]; do
   if runtime_config_parse_common_arg "$1" "${2-}"; then
@@ -52,16 +56,21 @@ while [[ $# -gt 0 ]]; do
     continue
   fi
   case "$1" in
+    --role) ROLE="$2"; shift 2 ;;
     --node) NODE="$2"; shift 2 ;;
     --container) CONTAINER="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --state) STATE="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --preserve-failure) PRESERVE_FAILURE=1; shift ;;
+    --restore-permissions-only) RESTORE_PERMISSIONS_ONLY=1; shift ;;
     --help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
 
+[[ -n "$ROLE" ]] || { echo "missing argument: --role" >&2; exit 2; }
+[[ "$ROLE" == "prefill" || "$ROLE" == "decode" ]] || { echo "invalid role: $ROLE" >&2; exit 2; }
 [[ -n "$NODE" ]] || { echo "missing argument: --node" >&2; exit 2; }
 [[ -n "$CONTAINER" ]] || { echo "missing argument: --container" >&2; exit 2; }
 [[ -n "$PORT" ]] || { echo "missing argument: --port" >&2; exit 2; }
@@ -127,40 +136,54 @@ if [[ -n "$STATE" ]]; then
   STATE_CONTAINER="$(state_container_path "$STATE")"
 fi
 
+if [[ "$RESTORE_PERMISSIONS_ONLY" == "1" ]]; then
+  restore_permissions_remote || true
+  echo "ARTIFACT_PERMISSIONS_RESTORED=$CONTAINER"
+  exit 0
+fi
+
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
   restore_permissions_remote || true
   if [[ -n "$STATE_HOST" ]]; then
-    printf 'python3 %q --state %q --set status=STOPPING\n' "$SKILL_HOST_ROOT/scripts/ops/update_state.py" "$STATE_HOST"
+    printf 'python3 %q --state %q --set pd.roles.%s.stop_status=STOPPING\n' "$SKILL_HOST_ROOT/scripts/ops/update_state.py" "$STATE_HOST" "$ROLE"
   fi
   printf 'ssh %q %q\n' "$NODE" "docker stop $(quote_sh "$CONTAINER")"
-  printf 'ssh %q %q\n' "$NODE" "ss -tlnp 2>/dev/null | grep ':$PORT ' || echo 'port $PORT released'"
+  printf 'ssh %q %q\n' "$NODE" "python3 -c <socket-port-check-$PORT>"
   if [[ -n "$STATE_HOST" ]]; then
-    printf 'python3 %q --state %q --set status=STOPPED --set service.port_released=true --set timing.stop_epoch=<epoch>\n' "$SKILL_HOST_ROOT/scripts/ops/update_state.py" "$STATE_HOST"
+    printf 'python3 %q --state %q --set pd.roles.%s.stop_status=STOPPED --set pd.roles.%s.port_released=true --set pd.roles.%s.stop_epoch=<epoch>\n' "$SKILL_HOST_ROOT/scripts/ops/update_state.py" "$STATE_HOST" "$ROLE" "$ROLE" "$ROLE"
   fi
   exit 0
 fi
 
 restore_permissions_remote || true
-update_state_local --set "status=STOPPING" || true
+update_state_local --set "pd.roles.$ROLE.stop_status=STOPPING" || true
 
 if ! ssh "$NODE" "docker stop $(quote_sh "$CONTAINER")"; then
-  update_state_local --set "status=STOP_FAILED" --set "failure.reason=docker_stop_failed" || true
+  if [[ "$PRESERVE_FAILURE" == "1" ]]; then
+    update_state_local --set "pd.roles.$ROLE.stop_status=STOP_FAILED" || true
+  else
+    update_state_local --set "status=STOP_FAILED" --set "pd.roles.$ROLE.stop_status=STOP_FAILED" --set "failure.reason=docker_stop_failed" --set "failure.detail=$ROLE" || true
+  fi
   echo "docker stop failed: $CONTAINER" >&2
   exit 1
 fi
 sleep 5
 
-if ssh "$NODE" "ss -tlnp 2>/dev/null | grep ':$PORT '" >/dev/null 2>&1; then
-  update_state_local --set "status=STOP_FAILED" --set "failure.reason=port_still_in_use_after_stop" || true
+if ssh "$NODE" "python3 -c \"import socket,sys; s=socket.socket(); s.settimeout(2); rc=s.connect_ex(('127.0.0.1', int('$PORT'))); s.close(); sys.exit(0 if rc == 0 else 1)\"" >/dev/null 2>&1; then
+  if [[ "$PRESERVE_FAILURE" == "1" ]]; then
+    update_state_local --set "pd.roles.$ROLE.stop_status=STOP_FAILED" --set "pd.roles.$ROLE.port_released=false" || true
+  else
+    update_state_local --set "status=STOP_FAILED" --set "pd.roles.$ROLE.stop_status=STOP_FAILED" --set "pd.roles.$ROLE.port_released=false" --set "failure.reason=port_still_in_use_after_stop" --set "failure.detail=$ROLE" || true
+  fi
   echo "port still in use after stop: $PORT" >&2
   exit 1
 fi
 
 STOP_TS="$(date +%s)"
 update_state_local \
-  --set "status=STOPPED" \
-  --set "service.port_released=true" \
-  --set "timing.stop_epoch=$STOP_TS" \
+  --set "pd.roles.$ROLE.stop_status=STOPPED" \
+  --set "pd.roles.$ROLE.port_released=true" \
+  --set "pd.roles.$ROLE.stop_epoch=$STOP_TS" \
   --set "paths.state_file_host=$STATE_HOST" || true
 
 echo "port $PORT released"

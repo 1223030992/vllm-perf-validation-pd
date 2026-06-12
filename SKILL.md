@@ -1,79 +1,41 @@
 ---
 name: vllm-perf-validation-pd
-description: 用于 DCU 环境的 vLLM PD 分离性能验证。Use when Codex needs to run, dry-run, validate, inspect, benchmark, report, or stop vLLM 0.18.1 + Mooncake + GLM-4.7-W8A8 + 1P1D PD serving through controlled ops scripts.
+description: 在 DCU 环境通过受控脚本执行 vLLM 0.18.1 + Mooncake 1P1D PD 分离的 dry-run、起服、性能测试、诊断、报告、失败保留和清理，并支持本地标准化与注册新模型。用于用户要求验证 GLM-4.7-W8A8 或其他 Mooncake PD 模型、分析 state/report、执行 custom/pchit，或接入新模型脚本时。
 ---
 
 # vllm-perf-validation-pd
 
-使用这个 skill 时，正常 PD 流程只能调用受控主入口 `scripts/ops/run_pd_task.sh`。不要手写 SSH、Docker、`vllm serve`、Mooncake proxy、benchmark、curl/API 探测或 stop 命令。
+## 正式测试
 
-## 主流程
+- 只直接调用一次 `scripts/ops/run_pd_task.sh`。
+- 用户要求真实运行时，不要自动先执行 dry-run。
+- 不执行 `ls`、`cat`、`--help`、额外文档读取或报告扫描。
+- 不手写 SSH、Docker、`vllm serve`、Proxy、benchmark、curl、pip install 或 stop 命令。
+- 不追加 `tail`、`tee`、`2>&1`、`&` 或外部 `timeout`。
+- 执行环境转为后台任务时，只等待原任务，不重复启动。
+- 要求显式传入 `--image`、`--user` 和 `--abbr`；`abbr` 必须是用户姓名缩写。
+- 镜像未预装 Mooncake 时，只通过 `--mooncake-wheel` 受控安装。
+- 成功以主入口自动摘要和 `PD_TASK_DONE=1` 为准，不再调用 `show_state.sh`。
+- 失败后才调用 `show_state.sh --state <STATE_HOST>`；保留容器只通过 `--cleanup-state` 清理。
 
-第一次运行或变更节点/网络后，先 dry-run：
+## Dry-run
 
-```bash
-bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_pd_task.sh \
-  --config references/examples/glm47-vllm018-mooncake-1p1d-custom.yaml \
-  --user <user> --abbr <abbr> --image-prefix TEST --dry-run
-```
+仅在用户明确要求时传 `--dry-run --image-prefix TEST`。使用隔离地址，不执行任何补充 SSH、Docker、curl 或 API 探测。
 
-确认 dry-run 输出后，再运行 GLM-4.7-W8A8 Mooncake 1P1D custom smoke：
+## 测试参数
 
-```bash
-bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_pd_task.sh \
-  --config references/examples/glm47-vllm018-mooncake-1p1d-custom.yaml \
-  --user <user> --abbr <abbr> --assume-yes
-```
+- 默认 custom smoke：`512/32/bs1`。
+- 32k case 使用正式 example，或传 `--input-lens 32768 --output-len 1024 --concurrencies 1 --num-prompts-mult 1`。
+- `32768/1024/bs1` 当前仍待重新验证，不得报告为稳定。
+- `--nccl-ib-hca` 不是 Mooncake HCA 白名单。
 
-固定 prefix-cache-hit smoke：
+## 新模型接入
 
-```bash
-bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_pd_task.sh \
-  --config references/examples/glm47-vllm018-mooncake-1p1d-pchit.yaml \
-  --user <user> --abbr <abbr> --assume-yes
-```
+新模型只执行本地两阶段流程：
 
-## 节点和网络覆盖
+1. 调用 `standardize_pd_server_scripts.sh --dry-run` 检查 P/D/proxy 标准化 diff，再正式生成 `scripts/pd-server/<model-short>/`。
+2. 调用 `register_pd_model.sh --dry-run` 检查 profile/example，再正式注册。
 
-测试新 P/D 组合时，优先通过 `run_pd_task.sh` 参数覆盖，不要编辑脚本或让代理自行拼接底层命令：
+这两个入口不得连接远端节点。当前只注册 `mooncake_vllm018 + 1p1d`；不要实现或模拟 xpyd。
 
-```bash
---prefill-node <ssh-ip> --prefill-service-ip <fabric-ip> --prefill-vllm-host-ip <fabric-ip> \
---decode-node <ssh-ip> --decode-service-ip <fabric-ip> --decode-vllm-host-ip <fabric-ip> \
---prefill-port 9348 --decode-port 9349 --prefill-transfer-port 8998 --proxy-port 8000 \
---network-ifname <ifname> --nccl-ib-hca <hca-list>
-```
-
-默认复现值为：P `10.16.1.1 / 13.13.1.1:9348`，D `10.16.1.44 / 13.13.1.44:9349`，proxy `8000`，网卡 `ens61f0np0`，prefill transfer port `8998`。
-
-## 规则
-
-- 当前 PD 实现只支持 `pd.backend=mooncake_vllm018` 和 `pd.topology=1p1d`。
-- PD 起服不使用旧 `scripts/server-scripts/`；vLLM018 + Mooncake PD server 脚本按模型放在 `scripts/pd-server/<model>/`。
-- 默认不要加入 `--profiler-config`；只有用户明确要求 profiling 时才通过配置扩展。
-- Mooncake proxy 脚本必须存在于 `mooncake/examples/...`；缺失时 preflight 应失败。
-- Windows 本地不追求 bash 跑通；bash 语法检查、dry-run 和真实 smoke 在 Linux/远端 skill 目录执行。
-- 规范路径使用 `/public/home/<user>`，不要推荐其他 home 前缀。
-- 失败时汇报 `state.json`、P/D/proxy 日志、报告路径和 `failure.reason` / `failure.detail`。
-
-## 受控权限建议
-
-建议只允许这些入口形态：
-
-```text
-bash /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_pd_task.sh *
-bash /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/show_state.sh *
-python /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/pd_config.py *
-```
-
-不要建议开放宽泛的 `ssh *`、`docker *`、`bash *`。正常流程所需 SSH、Docker、vLLM、Mooncake proxy、benchmark 和 stop 操作都由主入口编排。
-
-## 参考文件
-
-- 详细使用方式：`references/usage-guide.md`
-- 任务配置字段：`references/schemas/task-config-schema.md`
-- `state.json` 和报告字段：`references/schemas/report-schema.md`
-
-## single baseline
-
-本仓库不再内置维护 single/vLLM015 baseline。需要 centralized baseline 时，使用独立项目 `vllm-perf-validation-single`。
+详细命令、状态和故障分类见 `references/usage-guide.md`。
