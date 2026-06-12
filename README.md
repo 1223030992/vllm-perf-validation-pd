@@ -6,6 +6,14 @@
 
 当前稳定基线是 `GLM-4.7-W8A8 + Mooncake + 1P1D`。正式测试只调用 `scripts/ops/run_pd_task.sh`，不手写 SSH、Docker、`vllm serve`、Proxy、benchmark、curl 或 stop 命令。
 
+> **TL;DR**
+>
+> - **用途**：在 DCU 上一键跑通 vLLM 0.18.1 + Mooncake 1P1D PD 的端到端冒烟（容器 → P/D 起服 → runtime → proxy → benchmark → 报告）。
+> - **唯一入口**：`scripts/ops/run_pd_task.sh`（dry-run 和正式 run 都用同一个脚本）。
+> - **最近一次主 case（2026-06-12）**：GLM-4.7-W8A8，32k/1k/conc=4，CSV `PASS`，0 failed，TTFT Mean 17.07 s / P99 23.72 s，TPOT P99 39.93 ms，ITL P99 46.82 ms（详见 §8）。
+> - **每次必传**：`--user` / `--abbr` / `--prefill-node` / `--decode-node` / `--network-ifname` / `--nccl-ib-hca` / `--image`（缺一会 `preflight_pd` 失败）。
+> - **本 README 已脱敏**：所有具体 IP、用户、缩写、镜像、模型路径都用 `<占位符>` 表示；复制命令后请替换为本地值。
+
 ## 快速导航
 
 - [1. 新用户配置](#1-新用户配置)
@@ -16,7 +24,11 @@
 - [6. Claude 标准指令](#6-claude-标准指令)
 - [7. 新模型接入](#7-新模型接入)
 - [8. 已验证案例](#8-已验证案例)
+  - [8.0 关键指标](#80-关键指标)
+  - [8.1 性能观察](#81-性能观察)
+  - [8.2 历史案例](#82-历史案例)
 - [9. 常见问题](#9-常见问题)
+  - [9.6 example YAML 中硬编码的 IP 覆盖了真实节点](#96-example-yaml-中硬编码的-ip-覆盖了真实节点)
 - [10. 开发验证](#10-开发验证)
 
 ## 1. 新用户配置
@@ -27,10 +39,10 @@
 --user <Linux 用户名> --abbr <姓名缩写>
 ```
 
-`abbr` 是用户姓名缩写，只用于容器和工作目录命名，不是模型名或任务名。例如用户 `liuzhh8` 的姓名缩写为 `lzh`：
+`abbr` 是用户姓名缩写，只用于容器和工作目录命名，不是模型名或任务名。例如用户 `<user>` 的姓名缩写为 `<abbr>`：
 
 ```bash
---user liuzhh8 --abbr lzh
+--user <user> --abbr <abbr>
 ```
 
 运行时默认推导：
@@ -41,9 +53,26 @@ output:  /public/home/<user>/skilltest/vllm-perf-validation-pd
 prefix:  <abbr>-agent-test
 ```
 
-README 中的 `<user>`、`<abbr>`、节点和镜像都是占位符。历史实测路径只用于结果追溯，不参与新用户配置。
+本 README 中所有 IP、`<user>`、`<abbr>`、镜像、模型路径、网卡、HCA 均为占位符（与示例的脱敏值）。历史实测路径只用于结果追溯，不参与新用户配置，复制命令前请替换为本地实际值。
 
 ## 2. 快速使用
+
+> 主入口统一推进以下五个阶段，每一步都会更新 `state.json`；任何一步失败会落入受控 cleanup（见 §4 / §2.4）：
+>
+> ```text
+> ┌──────────────┐    ┌────────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+> │ ensure_      │ →  │ create_        │ →  │ start_       │ →  │ run_         │ →  │ stop_* /     │
+> │ workspace +  │    │ prefill/       │    │ prefill/     │    │ bench        │    │ finalize /   │
+> │ preflight_pd │    │ decode_        │    │ decode +     │    │ (custom or   │    │ render_      │
+> │              │    │ container      │    │ wait_ +      │    │ pchit)       │    │ report       │
+> │              │    │                │    │ proxy        │    │              │    │              │
+> └──────────────┘    └────────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
+>        ↘                    ↘                     ↘                  ↘                  ↘
+>                     ┌─────────────────────────────────────────────────────────┐
+>                     │  state.json   (pd.roles.* / pd.proxy / pd.transfer /    │
+>                     │                test.* / failure.*  / paths.*)            │
+>                     └─────────────────────────────────────────────────────────┘
+> ```
 
 ### 2.1 隔离 dry-run
 
@@ -79,7 +108,9 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_
 
 预装 Mooncake 的镜像不需要 `--mooncake-wheel`。只有输出 `PD_TASK_DONE=1` 才算成功。
 
-### 2.3 32k/1k/bs1
+> 提示：example YAML 中的 IP/端口如与本机不符，CLI flag 优先；详见 §9.6 的复盘。
+
+### 2.3 32k/1k/conc=4（推荐主 case）
 
 ```bash
 --config references/examples/glm47-vllm018-mooncake-1p1d-custom-32k1k-bs1.yaml
@@ -89,10 +120,11 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_
 
 ```bash
 --input-lens 32768 --output-len 1024 \
---concurrencies 1 --num-prompts-mult 1
+--concurrencies 4 --num-prompts-mult 1 \
+--mooncake-dest-device-affinity 1 --bench-timeout 3600
 ```
 
-该 case 当前仍是待重新验证状态，不应标记为稳定。
+最近一次 2026-06-12 验证通过，详细数据见 §8。原 `32k/1k/bs1` 已被本节取代。
 
 ### 2.4 失败保留和清理
 
@@ -120,7 +152,7 @@ vllm-perf-validation-pd/
 │   ├── examples/             # 节点、网络、端口和测试参数
 │   ├── pd-profiles/          # 模型、server scripts、runtime 和服务默认值
 │   ├── schemas/
-│   └── usage-guide.md
+│   └── usage-guide.md        # 字段定义、失败分类、日志样例
 └── scripts/
     ├── client-scripts/       # custom/pchit benchmark 实现
     ├── ops/                  # 唯一正式编排入口和受控辅助工具
@@ -174,7 +206,7 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/show
 
 | 模型 | Backend | 拓扑 | 状态 |
 |---|---|---|---|
-| GLM-4.7-W8A8 | Mooncake/vLLM018 | 1P1D | 已通过基础 smoke |
+| GLM-4.7-W8A8 | Mooncake/vLLM018 | 1P1D | 已通过 32k/1k/conc=4 smoke（2026-06-12） |
 | 新模型 | Mooncake/vLLM018 | 1P1D | 可通过标准化和注册工具扩展 |
 | 任意模型 | xpyd | xpyd | 规划中，尚未实现 |
 
@@ -185,10 +217,11 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/show
 | GLM4.7 Mooncake 1P1D 起服 | 已通过 |
 | runtime wheel 受控安装 | 已通过 |
 | Proxy listener/upstream/bootstrap/smoke readiness | 已通过 |
-| custom 512/32/bs1 | 已通过 |
-| custom 32768/1024/bs1 | 待重新验证 |
+| custom 512/32/bs1 | 历史通过 |
+| custom 32768/1024/conc=4 | 已通过（2026-06-12） |
+| `--mooncake-dest-device-affinity=1` | 已通过（2026-06-12） |
+| RDMA watchdog v5（transport retry / timeout watch） | 已通过（2026-06-12） |
 | pchit | 未实测 |
-| benchmark heartbeat/RDMA watchdog | 已实现，待更多实测 |
 | xpyd | 规划中 |
 
 ## 6. Claude 标准指令
@@ -198,18 +231,35 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/show
 ```text
 /vllm-perf-validation-pd
 
-执行一次 GLM-4.7-W8A8、vLLM 0.18.1、Mooncake 1P1D custom 真实冒烟测试。
+执行一次 GLM-4.7-W8A8、vLLM 0.18.1、Mooncake 1P1D 真实冒烟测试。
 
-只能直接调用一次 run_pd_task.sh。不要先执行 dry-run，不要执行 ls、cat、--help、usage-guide 读取、额外报告扫描，不要追加 tail、tee、2>&1、后台符号或外部 timeout。失败后才允许调用 show_state.sh。
+执行约束：
+- 只能直接调用一次 run_pd_task.sh。
+- 不要先执行 dry-run，不要执行 ls、cat、--help、usage-guide 读取、额外报告扫描。
+- 不要在命令后追加 tail、tee、管道、& 或外部 timeout。
+- 如果执行环境自动把命令转为后台任务，只等待原任务完成，禁止重复启动。
+- 失败后只能调用 show_state.sh。
+- 禁止手写 SSH、Docker、curl、vllm serve、Mooncake proxy、pip install 或 stop 命令。
 
-custom 参数：输入 512，输出 32，并发 1，请求数 1。
+运行前确认：
+- PD_SCRIPT_VERSION 必须为 2026.06.12-rdma-watchdog-v5。
+- 使用 custom 模式。
+- 输入长度 32768，输出长度 1024，并发 4，num_prompts_mult 1。
+- benchmark 单 case 超时 3600 秒。
+- Mooncake destination device affinity 设置为 1。
+- 使用 --keep-containers-on-failure 和 --assume-yes。
+- 镜像未预装 Mooncake 时使用 --mooncake-wheel <WHEEL> 受控安装。
+
 用户：<user>，姓名缩写：<abbr>。
-Prefill：<P_NODE> / <P_SERVICE_IP>:9348。
-Decode：<D_NODE> / <D_SERVICE_IP>:9349。
+Prefill：<PREFILL_NODE_IP> / <PREFILL_SERVICE_IP>:9348。
+Decode：<DECODE_NODE_IP> / <DECODE_SERVICE_IP>:9349。
 Transfer port：8998，Proxy port：8000，网卡：<IFNAME>，HCA：<HCA_LIST>。
 Host 模型：<HOST_MODEL_PATH>，Container 模型：<CONTAINER_MODEL_PATH>。
-镜像：<IMAGE>。镜像未预装 Mooncake 时使用 --mooncake-wheel <WHEEL>。
-使用 --assume-yes。完成后只根据主入口摘要汇报 PD_SCRIPT_VERSION、SELECTED_IMAGE、P/D/runtime/transfer/proxy、state、CSV 和报告路径。
+镜像：<IMAGE>。
+
+测试完还要输出性能报告（附简分析），要有 vllm bench serve 的关键指标。
+
+完成后只根据主入口摘要汇报 PD_SCRIPT_VERSION、SELECTED_IMAGE、P/D runtime 与 readiness、Proxy listener/upstream/bootstrap/smoke、Mooncake transfer protocol、P/D detected HCA、GID、benchmark current case、heartbeat、elapsed、最终状态、failure reason、transfer error summary、cleanup policy、containers preserved、state/CSV/JSON/Markdown 路径。
 ```
 
 ### 6.2 隔离 dry-run
@@ -272,30 +322,67 @@ references/examples/<profile-id>-1p1d-custom.yaml
 
 ## 8. 已验证案例
 
-### GLM-4.7-W8A8 Mooncake 1P1D custom
+### 8. GLM-4.7-W8A8 Mooncake 1P1D custom（32k/1k/conc=4）— 最近一次验证
 
-- 日期：2026-06-12
-- 镜像：`10.16.1.152:5000/jenkins/model_test_env/vllm:0.18.1-ubuntu22.04-dtk26.04-py3.10-20260608-1434`
-- Prefill：`10.16.1.1 / 13.13.1.1:9348`
-- Decode：`10.16.1.42 / 13.13.1.42:9349`
-- Transfer/Proxy：`8998 / 8000`，网卡 `ens61f0np0`
-- 测试：`input=512, output=32, concurrency=1, num_prompts=1`
-- 结果：`PASS`，P/D、runtime、RDMA transfer、Proxy 和 stop 均成功
-- Prefill readiness：约 210 秒
-- Decode readiness：约 271 秒
+- **日期**：2026-06-12
+- **PD_SCRIPT_VERSION**：`2026.06.12-rdma-watchdog-v5`
+- **vLLM**：0.18.1
+- **Mooncake**：`0.3.10.post1+das.opt1.dtk2604.2605131137.gd34f6f`（通过 `--mooncake-wheel` 在容器内受控安装）
+- **镜像**：`<REGISTRY>/vllm:<TAG>`（vLLM 0.18.1 + DCU DTK 26.04 + Python 3.10 基底）
+- **Prefill**：`<PREFILL_NODE_IP> / <PREFILL_SERVICE_IP>:9348`
+- **Decode**：`<DECODE_NODE_IP> / <DECODE_SERVICE_IP>:9349`
+- **Transfer / Proxy**：`8998 / 8000`
+- **网卡**：`<IFNAME>`（实际使用 `ens61f0np0`，仅作示例；HCA 白名单不同时 Mooncake 会自动发现）
+- **HCA**：`<HCA_LIST>`（`--nccl-ib-hca` 仅约束 NCCL，不是 Mooncake 限制）
+- **测试**：`input=32768, output=1024, concurrency=4, num_prompts_mult=1`，`--mooncake-dest-device-affinity=1`，`--bench-timeout=3600`
+- **结果**：CSV `status=PASS`，`failed=0`，`duration=64.70s`；P/D、runtime、RDMA transfer、Proxy readiness、stop 与 report 全部成功
+- **Cleanup policy**：`--keep-containers-on-failure` 已生效（容器在失败时保留以供诊断；本次成功路径下 P/D 容器在 stop_* 阶段被销毁）
 
-| 指标 | 结果 |
-|---|---:|
-| QPS | 0.54 |
-| Output throughput | 17.33 tok/s |
-| Total throughput | 294.56 tok/s |
-| Mean TTFT | 266.02 ms |
-| Mean TPOT | 50.97 ms |
-| ITL P99 | 558.69 ms |
+#### 8.0 关键指标
 
-历史成功产物使用了旧 `abbr=glm47pd-smoke`，路径保持不变，不迁移文件。后续测试统一使用姓名缩写 `--abbr lzh`。
+下表来自 `vllm bench serve` 输出（`vllm bench serve` 默认报告的字段，已对照 `csvs/custom/all.csv` 校核）：
 
-此前 `32768/1024/bs1` 曾触发 Mooncake RDMA transfer timeout，因此仍需使用当前 watchdog 版本重新验证。
+| 类别 | 指标 | 数值 |
+|---|---|---:|
+| 规模 | Total input tokens | 131,072 |
+| 规模 | Total generated tokens | 4,096 |
+| 规模 | Max request concurrency | 4.00 |
+| 时长 | Benchmark duration | 64.70 s |
+| 吞吐 | Request throughput | 0.06 req/s |
+| 吞吐 | Output token throughput | 63.31 tok/s |
+| 吞吐 | Peak output token throughput | 88.00 tok/s |
+| 吞吐 | Peak concurrent requests | 4.00 |
+| 吞吐 | Total token throughput | 2,089.10 tok/s |
+| TTFT (ms) | Mean | 17,068.56 |
+| TTFT (ms) | P50 | 17,920.10 |
+| TTFT (ms) | P95 | 23,299.74 |
+| TTFT (ms) | P99 | 23,718.86 |
+| TPOT (ms) | Mean | 37.59 |
+| TPOT (ms) | P50 | 37.38 |
+| TPOT (ms) | P95 | 39.82 |
+| TPOT (ms) | P99 | 39.93 |
+| ITL (ms) | Mean | 43.49 |
+| ITL (ms) | P50 | 45.76 |
+| ITL (ms) | P95 | 46.63 |
+| ITL (ms) | P99 | 46.82 |
+| 失败 | Failed requests | 0 |
+| 结论 | CSV status | PASS |
+
+#### 8.1 性能观察
+
+- **TTFT 由 prefill 主导**：Mean ~17.07 s、P95 ~23.30 s、P99 ~23.72 s。4 路并发 32k prefill 的计算量在当前硬件上就是这个量级；Mooncake transfer 不占大头。
+- **TPOT 健康**：Mean 37.59 ms / P99 39.93 ms，说明 Mooncake KV transfer 在 4 路并发下仍稳定；本轮未触发 §9.4 的 watchdog 异常信号（无 `transport retry counter exceeded` / `Sync batch data transfer timeout` / `pulling kv_caches ... failed`）。
+- **Output / Total 比例健康**：Total 2,089.10 tok/s 中 Output 仅 63.31 tok/s（≈3%），P/D 配比由 input token 量主导，prefill 计算 / KV transfer 路径是吞吐主轴。
+- **资源饱和**：Peak concurrent 4.00 = 配置上限，未出现把并发堆到 4 之后系统被打挂的情况。
+
+#### 8.2 历史案例
+
+| case | 关键参数 | 结果 | 备注 |
+|---|---|---|---|
+| 32k/1k/bs1（旧 watchdog） | input=32768, output=1024, conc=1 | 早期 RDMA transfer timeout | watchdog v5 修复后以 conc=4 复测通过，见 §8 主 case |
+| 512/32/bs1（更早） | input=512, output=32, conc=1 | PASS，Mean TTFT 266.02 ms，Mean TPOT 50.97 ms | 保留记录；指标见支持矩阵 §5 |
+
+旧 `--abbr=glm47pd-smoke` 的成功产物路径保持不变、不迁移；后续测试统一使用姓名缩写 `--abbr <abbr>`。
 
 ## 9. 常见问题
 
@@ -325,6 +412,18 @@ pulling kv_caches ... failed
 ### `show_state.sh` 报缺少 user
 
 优先传 Host 侧绝对 state 路径。标准 `/public/home/<user>/...` 路径会自动推导用户；远程读取或非标准路径仍需显式传 `--user`。
+
+### 9.6 example YAML 中硬编码的 IP 覆盖了真实节点
+
+**现象**：第一次正式 smoke 在 `preflight_pd` 阶段报 `DOCKER_IMAGE_NOT_FOUND` / `state.failure.reason=docker_image_not_found`，看起来是镜像没拉到。
+
+**根因**：实际上是 `references/examples/glm47-vllm018-mooncake-1p1d-custom.yaml` 中 `pd.roles.decode.node / service_ip / vllm_host_ip` 还指向更早一次测试用的旧 IP（被复用了同一份 example 而没有覆盖）。脚本走到 decode 节点做镜像预检时 SSH 不通，被归类成"镜像问题"。
+
+**教训**：
+
+- CLI flag 永远覆盖 YAML（`--prefill-node` / `--decode-node` / `--prefill-service-ip` / `--decode-service-ip` / `--prefill-vllm-host-ip` / `--decode-vllm-host-ip`），但 example YAML 中的节点字段会作为 SSH 默认目标；**每次新 run 都应显式传节点 IP**，不要依赖 example 里的旧值。
+- 修改 example YAML 时同步更新 `pd.roles.{prefill,decode}.{node,service_ip,vllm_host_ip}` 全套字段，或复制一份改名再做改动。
+- preflight 阶段的 `DOCKER_IMAGE_NOT_FOUND` 不一定真的是镜像问题——先打开 `<output>/work_dirs/<run>/state.json` 的 `preflight_pd` 段确认是 SSH 失败还是镜像缺失，再下结论。
 
 ## 10. 开发验证
 
