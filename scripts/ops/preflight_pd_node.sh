@@ -48,14 +48,47 @@ for var in PREFILL_NODE DECODE_NODE PROXY_NODE IMAGE PREFILL_PORT DECODE_PORT PR
 done
 
 quote_sh() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10)
 run_ssh() {
   local node="$1" label="$2" cmd="$3"
   echo "== ${node}: ${label} =="
   if [[ "$DRY_RUN" == "1" ]]; then
     printf 'ssh %q %q\n' "$node" "$cmd"
   else
-    ssh "$node" "$cmd"
+    ssh "${SSH_OPTS[@]}" "$node" "$cmd"
   fi
+}
+
+check_node_access() {
+  local node="$1" output=""
+  if [[ "$DRY_RUN" == "1" ]]; then
+    run_ssh "$node" ssh_access "true"
+    run_ssh "$node" docker_cli "command -v docker >/dev/null || (echo 'DOCKER_UNAVAILABLE' >&2; exit 1)"
+    run_ssh "$node" docker_access "docker info >/dev/null || (echo 'DOCKER_UNAVAILABLE_OR_PERMISSION_DENIED' >&2; exit 1)"
+    return 0
+  fi
+
+  if ! output="$(ssh "${SSH_OPTS[@]}" "$node" true 2>&1)"; then
+    if grep -Eqi 'permission denied|authentication failed|publickey' <<<"$output"; then
+      echo "SSH_AUTH_FAILED: node=$node detail=$output" >&2
+    else
+      echo "NODE_UNREACHABLE: node=$node detail=$output" >&2
+    fi
+    return 1
+  fi
+  if ! output="$(ssh "${SSH_OPTS[@]}" "$node" "command -v docker" 2>&1)"; then
+    echo "DOCKER_UNAVAILABLE: node=$node detail=$output" >&2
+    return 1
+  fi
+  if ! output="$(ssh "${SSH_OPTS[@]}" "$node" "docker info >/dev/null" 2>&1)"; then
+    if grep -Eqi 'permission denied|got permission denied|access denied' <<<"$output"; then
+      echo "DOCKER_PERMISSION_DENIED: node=$node detail=$output" >&2
+    else
+      echo "DOCKER_UNAVAILABLE: node=$node detail=$output" >&2
+    fi
+    return 1
+  fi
+  echo "NODE_ACCESS_READY=$node"
 }
 
 check_node() {
@@ -72,10 +105,20 @@ check_node() {
 
 read_image_id() {
   local node="$1" actual
-  actual="$(ssh "$node" "docker image inspect $(quote_sh "$IMAGE") --format '{{.Id}}'" 2>/dev/null)" || {
-    echo "DOCKER_IMAGE_NOT_FOUND: $IMAGE node=$node" >&2
+  if ! actual="$(ssh "${SSH_OPTS[@]}" "$node" "docker image inspect $(quote_sh "$IMAGE") --format '{{.Id}}'" 2>&1)"; then
+    if grep -Eqi 'permission denied|authentication failed|publickey' <<<"$actual"; then
+      echo "SSH_AUTH_FAILED: node=$node detail=$actual" >&2
+    elif grep -Eqi 'connection refused|connection timed out|no route to host|could not resolve|name or service not known' <<<"$actual"; then
+      echo "NODE_UNREACHABLE: node=$node detail=$actual" >&2
+    elif grep -Eqi 'permission denied.*docker|docker.sock' <<<"$actual"; then
+      echo "DOCKER_PERMISSION_DENIED: node=$node detail=$actual" >&2
+    elif grep -Eqi 'no such image|no such object' <<<"$actual"; then
+      echo "DOCKER_IMAGE_MISSING: image=$IMAGE node=$node" >&2
+    else
+      echo "DOCKER_UNAVAILABLE: node=$node detail=$actual" >&2
+    fi
     return 1
-  }
+  fi
   actual="${actual#sha256:}"
   [[ "$actual" =~ ^[A-Fa-f0-9]{12,64}$ ]] || {
     echo "DOCKER_IMAGE_ID_INVALID: node=$node actual=$actual" >&2
@@ -87,9 +130,9 @@ read_image_id() {
 check_images() {
   local prefill_id decode_id
   if [[ "$DRY_RUN" == "1" ]]; then
-    run_ssh "$PREFILL_NODE" docker_image "docker image inspect $(quote_sh "$IMAGE") --format 'PREFILL_IMAGE_ID={{.Id}}' || (echo 'DOCKER_IMAGE_NOT_FOUND: $IMAGE' >&2; exit 1)"
+    run_ssh "$PREFILL_NODE" docker_image "docker image inspect $(quote_sh "$IMAGE") --format 'PREFILL_IMAGE_ID={{.Id}}' || (echo 'DOCKER_IMAGE_MISSING: $IMAGE' >&2; exit 1)"
     if [[ "$DECODE_NODE" != "$PREFILL_NODE" ]]; then
-      run_ssh "$DECODE_NODE" docker_image "docker image inspect $(quote_sh "$IMAGE") --format 'DECODE_IMAGE_ID={{.Id}}' || (echo 'DOCKER_IMAGE_NOT_FOUND: $IMAGE' >&2; exit 1)"
+      run_ssh "$DECODE_NODE" docker_image "docker image inspect $(quote_sh "$IMAGE") --format 'DECODE_IMAGE_ID={{.Id}}' || (echo 'DOCKER_IMAGE_MISSING: $IMAGE' >&2; exit 1)"
     fi
     echo "IMAGE_ID_CONSISTENCY_CHECK=deferred"
     [[ -z "$EXPECTED_IMAGE_ID" ]] || echo "EXPECTED_IMAGE_ID=$EXPECTED_IMAGE_ID"
@@ -123,7 +166,7 @@ check_images() {
 
 check_port_free() {
   local node="$1" port="$2"
-  run_ssh "$node" "port_${port}" "if ss -tlnp 2>/dev/null | grep -q ':$port '; then echo 'PORT_IN_USE: $port' >&2; exit 1; else echo 'PORT_FREE: $port'; fi"
+  run_ssh "$node" "port_${port}" "python3 -c \"import socket; s=socket.socket(); s.bind(('0.0.0.0',$port)); s.close()\" || (echo 'PORT_IN_USE: $port' >&2; exit 1); echo 'PORT_FREE: $port'"
 }
 
 check_file() {
@@ -132,6 +175,11 @@ check_file() {
   run_ssh "$node" "$label" "test -f $(quote_sh "$full") || (echo 'REQUIRED_SCRIPT_NOT_FOUND: $full' >&2; exit 1)"
 }
 
+check_node_access "$PREFILL_NODE"
+[[ "$DECODE_NODE" == "$PREFILL_NODE" ]] || check_node_access "$DECODE_NODE"
+if [[ "$PROXY_NODE" != "$PREFILL_NODE" && "$PROXY_NODE" != "$DECODE_NODE" ]]; then
+  check_node_access "$PROXY_NODE"
+fi
 check_images
 check_node "$PREFILL_NODE"
 [[ "$DECODE_NODE" == "$PREFILL_NODE" ]] || check_node "$DECODE_NODE"

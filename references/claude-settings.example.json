@@ -3,6 +3,8 @@
     "allow": [
       "Bash(bash /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_pd_task.sh *)",
       "Bash(bash /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/show_state.sh *)",
+      "Bash(bash /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/configure_pd_deployment.sh *)",
+      "Bash(bash /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/onboard_pd_model.sh *)",
       "Bash(bash /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/standardize_pd_server_scripts.sh *)",
       "Bash(bash /public/home/*/.claude/skills/vllm-perf-validation-pd/scripts/ops/register_pd_model.sh *)"
     ]

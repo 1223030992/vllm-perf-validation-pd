@@ -51,7 +51,7 @@ class PdModelOnboardingTest(unittest.TestCase):
             self.assertIn("PD_SERVER_STANDARDIZE_DRY_RUN_DONE=1", result.stdout)
             self.assertFalse((Path(tmp) / "scripts" / "pd-server" / "testw8a8").exists())
 
-    def test_register_generates_profile_and_smoke_example(self):
+    def test_register_generates_profile_and_smoke_preset_without_deployment(self):
         with tempfile.TemporaryDirectory() as tmp:
             sources = self.prepare_sources(tmp)
             result = self.run_cmd(self.standardize_args(tmp, sources))
@@ -90,11 +90,13 @@ class PdModelOnboardingTest(unittest.TestCase):
             real = self.run_cmd(args)
             self.assertEqual(real.returncode, 0, real.stderr)
             profile = Path(tmp) / "references" / "pd-profiles" / "test-vllm018-mooncake.yaml"
-            example = Path(tmp) / "references" / "examples" / "test-vllm018-mooncake-1p1d-custom.yaml"
+            preset = Path(tmp) / "references" / "test-presets" / "testw8a8-smoke.yaml"
             self.assertIn("model_short: testw8a8", profile.read_text(encoding="utf-8"))
-            example_text = example.read_text(encoding="utf-8")
-            self.assertIn("input_lens: [512]", example_text)
-            self.assertIn("ifname: test0", example_text)
+            profile_text = profile.read_text(encoding="utf-8")
+            preset_text = preset.read_text(encoding="utf-8")
+            self.assertIn("input_lens: [512]", preset_text)
+            self.assertNotIn("ifname: test0", profile_text)
+            self.assertNotIn("node: 192.0.2.10", profile_text)
 
 
 if __name__ == "__main__":

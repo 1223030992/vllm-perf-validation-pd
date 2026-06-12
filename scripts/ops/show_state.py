@@ -59,12 +59,7 @@ def csv_summary(csv_file, test_mode=""):
         "itl_p99_ms": ["p99_itl", "p99_itl_ms"],
     }
     if test_mode == "pchit":
-        metrics.update(
-            {
-                "pchit_effective_pct": ["effective_cache_hit_pct"],
-                "pchit_best_sla_concurrency": ["concurrency"],
-            }
-        )
+        metrics.update({"pchit_effective_pct": ["effective_cache_hit_pct"]})
     for label, keys in metrics.items():
         vals = values(keys)
         if vals:
@@ -76,6 +71,17 @@ def csv_summary(csv_file, test_mode=""):
         summary["completed_requests"] = int(sum(completed))
     if failed:
         summary["failed_requests"] = int(sum(failed))
+    if test_mode == "pchit":
+        passing = []
+        for row in rows:
+            status = str(row.get("status") or "").strip().upper()
+            sla_pass = str(row.get("sla_pass") or "").strip().lower()
+            if status == "PASS" or sla_pass in {"true", "1", "yes", "pass"}:
+                value = first_number(row, ["concurrency"])
+                if value is not None:
+                    passing.append(value)
+        if passing:
+            summary["pchit_best_sla_concurrency"] = int(max(passing))
     return summary
 
 
@@ -171,6 +177,9 @@ def main():
         ("containers_preserved", ["cleanup.containers_preserved"]),
         ("cleanup_status", ["cleanup.status"]),
         ("test_status", ["test.status"]),
+        ("execution_status", ["test.execution_status", "report.execution_status"]),
+        ("benchmark_status", ["test.benchmark_status", "report.benchmark_status"]),
+        ("sla_status", ["test.sla_status", "report.sla_status"]),
         ("test_current_case", ["test.current_case"]),
         ("test_heartbeat_at", ["test.heartbeat_at"]),
         ("test_elapsed_seconds", ["test.elapsed_seconds"]),

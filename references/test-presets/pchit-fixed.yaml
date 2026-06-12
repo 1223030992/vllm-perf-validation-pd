@@ -1,0 +1,15 @@
+test:
+  mode: pchit
+  params:
+    input_len: 32768
+    output_len: 1024
+    pc_hit_target: 90
+    batches: [1, 2, 3, 4, 5, 6, 7, 8]
+    concurrency_multiplier: 1
+    request_rate: null
+    pchit_benchmark_mode: fixed
+    ttft_sla_ms: 5000
+    tpot_sla_ms: 50
+    sla_stat: mean
+    prefix_warmup_requests: 1
+    case_warmup_repeats: 0

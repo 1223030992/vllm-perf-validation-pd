@@ -117,7 +117,7 @@ def truthy(value):
     return str(value or "").strip().lower() in {"true", "1", "yes", "y", "pass"}
 
 
-def summarize(rows):
+def summarize(rows, test_mode=""):
     statuses = [normalize_status(row) for row in rows]
     numeric = {
         "max_qps": ["rps", "request_throughput", "qps"],
@@ -176,14 +176,36 @@ def summarize(rows):
     if best_concurrency:
         result["best_sla_concurrency"] = int(max(best_concurrency))
 
-    if result["failed"]:
-        result["status"] = "FAIL"
-    elif result["partial"]:
-        result["status"] = "PARTIAL"
-    elif result["passed"] == len(rows) and rows:
-        result["status"] = "PASS"
+    if test_mode == "pchit":
+        if not rows:
+            execution_status = "FAIL"
+            benchmark_status = "FAIL"
+            sla_status = "NOT_APPLICABLE"
+        else:
+            request_failures = result["failed_requests"] or 0
+            execution_status = "PASS" if request_failures == 0 else "FAIL"
+            benchmark_status = execution_status
+            if result["passed"] == len(rows):
+                sla_status = "PASS"
+            elif result["passed"] > 0:
+                sla_status = "PARTIAL"
+            else:
+                sla_status = "FAIL"
     else:
-        result["status"] = "SKIPPED"
+        sla_status = "NOT_APPLICABLE"
+        if result["failed"] or result["partial"] or not rows:
+            execution_status = "FAIL"
+            benchmark_status = "FAIL"
+        elif result["passed"] == len(rows):
+            execution_status = "PASS"
+            benchmark_status = "PASS"
+        else:
+            execution_status = "FAIL"
+            benchmark_status = "FAIL"
+    result["status"] = execution_status
+    result["execution_status"] = execution_status
+    result["benchmark_status"] = benchmark_status
+    result["sla_status"] = sla_status
     return result
 
 
@@ -244,10 +266,15 @@ def main():
         raise SystemExit("CSV 文件不存在: {}".format(csv_file))
 
     rows = [] if csv_missing else load_csv(csv_file)
-    summary = summarize(rows)
-    final_status = summary["status"]
+    test_mode = str(deep_get(state, "test.mode", "") or "").lower()
+    summary = summarize(rows, test_mode)
+    execution_status = summary["execution_status"]
+    benchmark_status = summary["benchmark_status"]
+    sla_status = summary["sla_status"]
     if state_is_failure(state):
-        final_status = "FAIL"
+        execution_status = "FAIL"
+        benchmark_status = "FAIL"
+    final_status = execution_status
 
     report_dir = writable_path(args.report_dir)
     log_file = deep_get(state, "paths.log_file_host") or deep_get(state, "paths.log_file")
@@ -257,6 +284,9 @@ def main():
         "run_id": args.run_id,
         "generated_at": utc_now_iso(),
         "status": final_status,
+        "execution_status": execution_status,
+        "benchmark_status": benchmark_status,
+        "sla_status": sla_status,
         "node": state.get("node"),
         "image": state.get("image"),
         "image_ref": state.get("image_ref"),
@@ -277,7 +307,10 @@ def main():
         },
         "test": {
             "mode": deep_get(state, "test.mode"),
-            "status": deep_get(state, "test.status", summary["status"]),
+            "status": deep_get(state, "test.status", execution_status),
+            "execution_status": execution_status,
+            "benchmark_status": benchmark_status,
+            "sla_status": sla_status,
             "current_case": deep_get(state, "test.current_case"),
             "heartbeat_at": deep_get(state, "test.heartbeat_at"),
             "elapsed_seconds": deep_get(state, "test.elapsed_seconds"),
@@ -315,9 +348,12 @@ def main():
     json_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     md_lines = [
-        "# vLLM 性能报告: {}".format(args.run_id),
+        "# PD benchmark report: {}".format(args.run_id),
         "",
-        "- 状态: {}".format(final_status),
+        "- Execution status: {}".format(execution_status),
+        "- Benchmark status: {}".format(benchmark_status),
+        "- SLA status: {}".format(sla_status),
+        "",
         "- 节点: {}".format(report["node"]),
         "- 镜像: {}".format(report["image"]),
         "- 容器: {}".format(deep_get(state, "container.name")),
@@ -457,6 +493,12 @@ def main():
     set_path(state, "paths.report_md_host", str(md_path))
     set_path(state, "report.run_id", args.run_id)
     set_path(state, "report.status", final_status)
+    set_path(state, "report.execution_status", execution_status)
+    set_path(state, "report.benchmark_status", benchmark_status)
+    set_path(state, "report.sla_status", sla_status)
+    set_path(state, "test.execution_status", execution_status)
+    set_path(state, "test.benchmark_status", benchmark_status)
+    set_path(state, "test.sla_status", sla_status)
     set_path(state, "report.generated_at", report["generated_at"])
     if deep_get(state, "test.mode") == "pchit" or state.get("pchit"):
         set_path(

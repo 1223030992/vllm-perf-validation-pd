@@ -42,10 +42,11 @@ def main():
     parser = argparse.ArgumentParser(description="更新 vLLM 性能测试 state.json")
     parser.add_argument("--state", required=True, type=Path)
     parser.add_argument("--set", action="append", default=[], dest="sets", metavar="KEY=VALUE")
+    parser.add_argument("--reset", action="store_true")
     args = parser.parse_args()
 
     data = {}
-    if args.state.exists():
+    if args.state.exists() and not args.reset:
         data = json.loads(args.state.read_text(encoding="utf-8-sig"))
 
     for item in args.sets:

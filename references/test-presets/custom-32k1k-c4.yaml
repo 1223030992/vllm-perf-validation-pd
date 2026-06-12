@@ -1,0 +1,9 @@
+test:
+  mode: custom
+  params:
+    input_lens: [32768]
+    output_len: 1024
+    concurrencies: [4]
+    num_prompts_mult: 1
+    request_rate: null
+    percentiles: "50,95,99"

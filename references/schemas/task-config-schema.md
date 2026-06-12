@@ -1,86 +1,97 @@
-# Task Config Schema
+# 配置字段说明
 
-PD task YAML 会与 `pd.profile` 指向的 profile 合并。当前只支持 `mooncake_vllm018 + 1p1d`。
+推荐使用三层配置，不在仓库 example 中写真实节点。
 
-运行时 CLI 可以覆盖 custom 参数：`--input-lens`、`--output-len`、`--concurrencies`、`--num-prompts-mult`、`--request-rate`、`--percentiles`。优先级为 CLI > YAML > 内置默认值，pchit 不接受这些 custom 覆盖。
-
-## 核心结构
+## Model profile
 
 ```yaml
-task:
-  name: glm47_vllm018_mooncake_1p1d_custom
-mode: pd
-
+model:
+  name: <MODEL_NAME>
+  model_short: <MODEL_SHORT>
+  host_model_path: <HOST_MODEL_PATH>
+  container_model_path: <CONTAINER_MODEL_PATH>
+  precision: <PRECISION>
 pd:
-  profile: references/pd-profiles/glm47-vllm018-mooncake.yaml
+  backend: mooncake_vllm018
+  topology: 1p1d
   server_scripts:
-    prefill: scripts/pd-server/glm47-w8a8/p_server.sh
-    decode: scripts/pd-server/glm47-w8a8/d_server.sh
-    proxy: scripts/pd-server/glm47-w8a8/run_proxy.sh
+    prefill: scripts/pd-server/<model-short>/p_server.sh
+    decode: scripts/pd-server/<model-short>/d_server.sh
+    proxy: scripts/pd-server/<model-short>/run_proxy.sh
   runtime:
     mooncake_wheel: null
     mooncake_dest_device_affinity: true
+  service_defaults:
+    tp: 8
+    gpu_range: "0,1,2,3,4,5,6,7"
+    quantization: <QUANTIZATION>
+    dtype: bfloat16
+```
+
+## Deployment
+
+```yaml
+deployment:
+  id: <DEPLOYMENT_ID>
+pd:
   network:
-    ifname: ens61f0np0
-    nccl_ib_hca: mlx5_2,mlx5_3
+    ifname: <IFNAME>
+    nccl_ib_hca: <HCA_LIST>
   roles:
     prefill:
-      node: 10.16.1.1
-      service_ip: 13.13.1.1
-      vllm_host_ip: 13.13.1.1
+      node: <P_NODE>
+      service_ip: <P_SERVICE_IP>
+      vllm_host_ip: <P_SERVICE_IP>
       port: 9348
       transfer_port: 8998
     decode:
-      node: 10.16.1.42
-      service_ip: 10.16.1.42
-      vllm_host_ip: 10.16.1.42
+      node: <D_NODE>
+      service_ip: <D_SERVICE_IP>
+      vllm_host_ip: <D_SERVICE_IP>
       port: 9349
   proxy:
     node_role: prefill
     port: 8000
+```
 
+网卡和 HCA 探测仅告警。节点、service IP 和 `VLLM_HOST_IP` 缺失时在 SSH 前失败。
+
+## Test preset
+
+Custom：
+
+```yaml
 test:
   mode: custom
+  params:
+    input_lens: [512]
+    output_len: 32
+    concurrencies: [1]
+    num_prompts_mult: 1
+    request_rate: null
+    percentiles: "50,95,99"
 ```
 
-example 和 `task.yaml` 不定义 `image.name`。真实镜像必须通过主入口的 `--image` 显式提供。
+PCHIT：
 
-## Runtime 字段
+```yaml
+test:
+  mode: pchit
+  params:
+    input_len: 32768
+    output_len: 1024
+    batches: [1, 2, 3, 4, 5, 6, 7, 8]
+    pc_hit_target: 90
+    pchit_benchmark_mode: fixed
+    ttft_sla_ms: 5000
+    tpot_sla_ms: 50
+    sla_stat: mean
+```
 
-- `pd.runtime.mooncake_wheel`：可选 HTTP(S) URL 或容器内绝对路径；默认空。
-- `pd.runtime.mooncake_dest_device_affinity`：布尔值，GLM4.7 默认 `true`。
-- 空值表示镜像必须预装可导入的 `mooncake.engine`。
-- 非空值表示在 P/D 新容器中受控安装，然后验证依赖。
-
-## 命令行覆盖
-
-- `--image`：必填镜像引用。
-- `--image-id`：可选短或完整镜像 ID；`--image-digest` 是兼容别名。
-- `--mooncake-wheel`
-- `--host-model-path`
-- `--container-model-path`
-- `--prefill-node` / `--prefill-service-ip` / `--prefill-vllm-host-ip`
-- `--decode-node` / `--decode-service-ip` / `--decode-vllm-host-ip`
-- `--prefill-port` / `--decode-port` / `--prefill-transfer-port` / `--proxy-port`
-- `--network-ifname` / `--nccl-ib-hca` / `--mooncake-dest-device-affinity`
-- `--ready-timeout` / `--proxy-timeout` / `--proxy-request-timeout` / `--bench-timeout` / `--interval`
-
-`--nccl-ib-hca` 只配置 NCCL，不限制 Mooncake Transfer Engine 的 HCA 自动发现。
-
-`--image-prefix` 只控制容器名后缀，不是镜像覆盖参数。
-
-## 模型与服务默认值
-
-GLM4.7 profile 默认模型路径：
+## 合并优先级
 
 ```text
-/public/opendas/DL_DATA/llm-models/GLM-4.7-W8A8
-->
-/model/GLM-4.7-W8A8
+CLI > legacy --config > test preset > deployment > model profile > default
 ```
 
-额外 vLLM 参数使用 `pd.service_defaults.extra_args`、`prefill_extra_args` 和 `decode_extra_args`。默认不加入 profiler。
-
-`pd.server_scripts.prefill`、`decode` 和 `proxy` 必须由 profile 明确定义。主入口不提供任何模型专属兜底路径，缺少字段时必须在 SSH 前失败。
-
-新增模型应通过 `standardize_pd_server_scripts.sh` 和 `register_pd_model.sh` 生成脚本、profile 和 example，不要复制 GLM4.7 profile 后手工遗留模型参数。
+真实镜像必须通过 `--image` 提供。新模型使用 `onboard_pd_model.sh` 接入，不复制已有 GLM profile。

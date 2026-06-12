@@ -1,7 +1,7 @@
 interface:
   display_name: "vLLM Mooncake PD 验证"
-  short_description: "通过受控入口执行 Mooncake 1P1D 验证并快速扩展新模型"
-  default_prompt: "使用 $vllm-perf-validation-pd 直接执行一次受控 PD 测试；真实运行不要自动 dry-run，成功后依据主入口摘要汇报结果。"
+  short_description: "通过受控入口执行 Mooncake 1P1D 性能测试并快速接入新模型"
+  default_prompt: "使用 $vllm-perf-validation-pd 按 profile、deployment 和 test preset 直接执行一次受控 PD 测试；真实运行不自动 dry-run，成功后只根据主入口摘要汇报。"
 
 policy:
   allow_implicit_invocation: false

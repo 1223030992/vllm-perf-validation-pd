@@ -141,6 +141,44 @@ def load_with_profile(config_path):
     return deep_merge(profile, config)
 
 
+def resolve_named_file(value, directory, suffix=".yaml"):
+    path = Path(str(value)).expanduser()
+    skill_root = Path(__file__).resolve().parents[2]
+    candidates = [path] if path.is_absolute() else [Path.cwd() / path, skill_root / path]
+    if not path.is_absolute() and len(path.parts) == 1:
+        name = path.name if path.name.endswith(suffix) else path.name + suffix
+        candidates.append(skill_root / "references" / directory / name)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    raise SystemExit("{} not found: {}".format(directory.rstrip("s"), value))
+
+
+def compose_config(config=None, profile=None, deployment=None, test_preset=None):
+    data = {}
+    sources = []
+    if profile:
+        path = resolve_named_file(profile, "pd-profiles")
+        part = load_yaml(path)
+        part.pop("pd_profile", None)
+        data = deep_merge(data, part)
+        sources.append(str(path))
+    if deployment:
+        path = resolve_named_file(deployment, "deployments")
+        data = deep_merge(data, load_yaml(path))
+        sources.append(str(path))
+    if test_preset:
+        path = resolve_named_file(test_preset, "test-presets")
+        data = deep_merge(data, load_yaml(path))
+        sources.append(str(path))
+    if config:
+        path = Path(config).expanduser().resolve()
+        data = deep_merge(data, load_with_profile(path))
+        sources.append(str(path))
+    data.setdefault("config_sources", sources)
+    return data
+
+
 def flatten(data, prefix=""):
     if isinstance(data, dict):
         for key, value in data.items():
@@ -166,11 +204,16 @@ def shell_value(value):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True)
+    parser.add_argument("--config")
+    parser.add_argument("--profile")
+    parser.add_argument("--deployment")
+    parser.add_argument("--test-preset")
     parser.add_argument("--shell", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    data = load_with_profile(args.config)
+    if not args.config and not args.profile:
+        raise SystemExit("pass --config or --profile")
+    data = compose_config(args.config, args.profile, args.deployment, args.test_preset)
     if args.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
         return

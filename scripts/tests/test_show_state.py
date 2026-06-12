@@ -31,7 +31,7 @@ class ShowStateTest(unittest.TestCase):
 
     def test_pchit_summary_emits_pchit_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = self.write_csv(tmp, {"concurrency": "4", "effective_cache_hit_pct": "87.5"})
+            path = self.write_csv(tmp, {"concurrency": "4", "effective_cache_hit_pct": "87.5", "status": "PASS"})
             summary = SHOW_STATE.csv_summary(path, "pchit")
             self.assertEqual(summary["pchit_best_sla_concurrency"], 4.0)
             self.assertEqual(summary["pchit_effective_pct"], 87.5)

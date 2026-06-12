@@ -1,27 +1,18 @@
 task:
   name: glm47_vllm018_mooncake_1p1d_pchit
   run_id: auto
-  owner: liuzhihuan
-  description: GLM-4.7 vLLM 0.18 Mooncake 1P1D fixed prefix-cache-hit benchmark
+  owner: example
+  description: Deployment-neutral GLM-4.7 fixed prefix-cache-hit benchmark
 
 mode: pd
 
 pd:
   profile: references/pd-profiles/glm47-vllm018-mooncake.yaml
-  network:
-    ifname: ens61f0np0
-    nccl_ib_hca: mlx5_2,mlx5_3,mlx5_4,mlx5_5,mlx5_6,mlx5_8,mlx5_9
   roles:
     prefill:
-      node: 10.16.1.1
-      service_ip: 13.13.1.1
-      vllm_host_ip: 13.13.1.1
       port: 9348
       transfer_port: 8998
     decode:
-      node: 10.16.1.44
-      service_ip: 13.13.1.44
-      vllm_host_ip: 13.13.1.44
       port: 9349
   proxy:
     node_role: prefill

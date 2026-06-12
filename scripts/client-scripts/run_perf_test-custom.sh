@@ -212,7 +212,8 @@ done
     echo "$exec_summary"
 } >> "${RUN_DIR}/commands_backup.txt"
 
-echo "CUSTOM_BENCH_DONE=${overall_rc}"
+echo "CUSTOM_BENCH_DONE=$((overall_rc == 0 ? 1 : 0))"
+echo "CUSTOM_BENCH_RC=${overall_rc}"
 echo "CSV_FILE=${all_log}"
 cat "$all_log"
 

@@ -10,7 +10,11 @@ from pathlib import Path
 
 ERROR_PATTERNS = [
     (r"(?:DOCKER|PD)_IMAGE_ID_MISMATCH", "docker_image_id_mismatch"),
-    (r"DOCKER_IMAGE_NOT_FOUND", "docker_image_not_found"),
+    (r"NODE_UNREACHABLE", "node_unreachable"),
+    (r"SSH_AUTH_FAILED", "ssh_auth_failed"),
+    (r"DOCKER_PERMISSION_DENIED", "docker_permission_denied"),
+    (r"DOCKER_UNAVAILABLE", "docker_unavailable"),
+    (r"DOCKER_IMAGE_(?:MISSING|NOT_FOUND)", "docker_image_missing"),
     (r"HOST_MODEL_PATH_NOT_FOUND", "host_model_path_missing"),
     (r"REQUIRED_SCRIPT_NOT_FOUND", "required_script_missing"),
     (r"PORT_IN_USE", "port_in_use"),

@@ -38,7 +38,7 @@ def command_tokens(text):
     start = None
     command = []
     for index, line in enumerate(lines):
-        if re.search(r"(^\s*|[;&]\s*)vllm\s+serve\b", line):
+        if re.search(r"(^\s*|[;&(]\s*)vllm\s+serve\b", line):
             start = index
             break
     if start is None:
@@ -48,11 +48,14 @@ def command_tokens(text):
         if candidate.strip():
             previous = candidate.strip()
             break
-    array_mode = previous.endswith("=(") or previous == "cmd=("
+    array_mode = previous.endswith("=(") or previous == "cmd=(" or "=(vllm serve" in lines[start]
     index = start
     while index < len(lines):
         line = lines[index].strip()
         if array_mode and line == ")":
+            break
+        if array_mode and line.endswith(")"):
+            command.append(line[:-1].rstrip())
             break
         command.append(line[:-1].rstrip() if line.endswith("\\") else line)
         if not array_mode and not line.endswith("\\"):
@@ -79,6 +82,7 @@ def parse_role_script(path):
 
     values = {
         "model_path": model_path,
+        "gpu_range": assignments.get("HIP_VISIBLE_DEVICES", "0"),
         "port": "8000",
         "tp": "1",
         "quantization": "",
@@ -161,7 +165,7 @@ def role_script(role, defaults):
     text = """#!/usr/bin/env bash
 set -euo pipefail
 
-MODEL_PATH={model}; PORT={port}; {transfer_init}VLLM_HOST_IP=""; GPU_RANGE="0,1,2,3,4,5,6,7"; TP={tp}
+MODEL_PATH={model}; PORT={port}; {transfer_init}VLLM_HOST_IP=""; GPU_RANGE={gpu_range}; TP={tp}
 NETWORK_IFNAME=""; NCCL_IB_HCA=""; MOONCAKE_DEST_DEVICE_AFFINITY="1"
 QUANTIZATION={quant}; DTYPE={dtype}; MAX_NUM_BATCHED_TOKENS={max_tokens}
 MAX_NUM_SEQS={max_seqs}; GPU_MEMORY_UTILIZATION={gpu_mem}; MAX_MODEL_LEN={max_len}
@@ -214,7 +218,8 @@ if [[ -n "$EXTRA_ARGS" ]]; then read -r -a extra_argv <<< "$EXTRA_ARGS"; cmd+=("
 exec "${{cmd[@]}}"
 """.format(
         model=shell_quote(defaults["model_path"]), port=shell_quote(defaults["port"]),
-        transfer_init=transfer_init, tp=shell_quote(defaults["tp"]), quant=shell_quote(quant_default),
+        transfer_init=transfer_init, gpu_range=shell_quote(defaults["gpu_range"]),
+        tp=shell_quote(defaults["tp"]), quant=shell_quote(quant_default),
         dtype=shell_quote(defaults["dtype"]), max_tokens=shell_quote(defaults["max_num_batched_tokens"]),
         max_seqs=shell_quote(defaults["max_num_seqs"]), gpu_mem=shell_quote(defaults["gpu_memory_utilization"]),
         max_len=shell_quote(defaults["max_model_len"]), spec=shell_quote(defaults["speculative_config"]),
