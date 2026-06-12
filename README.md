@@ -154,7 +154,7 @@ bash /public/home/<user>/.claude/skills/vllm-perf-validation-pd/scripts/ops/run_
 | custom `32768/1024/c4` | 已通过 |
 | pchit fixed `bs1..8` | 已执行通过，SLA 最佳并发 5 |
 | 历史 custom `32768/1024/c1` | 曾发生 RDMA timeout，未宣称已修复 |
-| 新模型一键接入 | 已提供 |
+| 新模型一键接入 | 已提供 (待验证) |
 | xpyd | 规划中 |
 
 详细实测记录见 [references/verified-runs.md](references/verified-runs.md)。
