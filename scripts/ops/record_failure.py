@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 ERROR_PATTERNS = [
+    (r"estimated maximum model length|KV cache is needed.*available KV cache", "kv_cache_capacity_insufficient"),
     (r"(?:DOCKER|PD)_IMAGE_ID_MISMATCH", "docker_image_id_mismatch"),
     (r"NODE_UNREACHABLE", "node_unreachable"),
     (r"SSH_AUTH_FAILED", "ssh_auth_failed"),
@@ -21,6 +22,18 @@ ERROR_PATTERNS = [
     (r"mooncake_install_failed", "mooncake_install_failed"),
     (r"mooncake_transfer_engine_missing", "mooncake_transfer_engine_missing"),
 ]
+
+ERROR_HINTS = {
+    "kv_cache_capacity_insufficient": (
+        "decrease --max-model-len or, after checking device memory headroom, adjust "
+        "--gpu-memory-utilization"
+    ),
+    "host_model_path_missing": (
+        "update the user deployment with configure_pd_deployment.sh --update-existing "
+        "--host-model-path <PATH>, or pass run_pd_task.sh --host-model-path <PATH>; "
+        "do not edit the shared model profile"
+    ),
+}
 
 
 def utc_now_iso():
@@ -78,6 +91,9 @@ def main():
         set_path(state, "failure.reason", classify(args.stage, output))
     if not deep_get(state, "failure.detail"):
         set_path(state, "failure.detail", summarize(output) or args.stage)
+    reason = deep_get(state, "failure.reason")
+    if not deep_get(state, "failure.hint") and reason in ERROR_HINTS:
+        set_path(state, "failure.hint", ERROR_HINTS[reason])
     state["updated_at"] = utc_now_iso()
     args.state.parent.mkdir(parents=True, exist_ok=True)
     args.state.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

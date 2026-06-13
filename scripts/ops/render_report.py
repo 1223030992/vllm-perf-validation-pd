@@ -217,6 +217,21 @@ def first_state_path(state, keys):
     return None
 
 
+def benchmark_was_started(state):
+    test_status = str(deep_get(state, "test.status", "") or "").upper()
+    task_status = str(deep_get(state, "status", "") or "").upper()
+    failure_stage = str(deep_get(state, "failure.stage", "") or "")
+    if test_status in {"RUNNING", "FAILED", "COMPLETED"}:
+        return True
+    if task_status.startswith("BENCH_") or failure_stage == "run_bench":
+        return True
+    return bool(
+        deep_get(state, "test.current_case")
+        or deep_get(state, "test.heartbeat_at")
+        or deep_get(state, "test.elapsed_seconds")
+    )
+
+
 def state_is_failure(state):
     if state.get("status") in {
         "SERVICE_FAILED",
@@ -273,7 +288,11 @@ def main():
     sla_status = summary["sla_status"]
     if state_is_failure(state):
         execution_status = "FAIL"
-        benchmark_status = "FAIL"
+        benchmark_status = "FAIL" if benchmark_was_started(state) else "NOT_RUN"
+    summary["status"] = execution_status
+    summary["execution_status"] = execution_status
+    summary["benchmark_status"] = benchmark_status
+    summary["sla_status"] = sla_status
     final_status = execution_status
 
     report_dir = writable_path(args.report_dir)
@@ -380,6 +399,10 @@ def main():
         ),
         "- Mooncake destination affinity: `{}`".format(
             deep_get(state, "pd.runtime.mooncake_dest_device_affinity")
+        ),
+        "- max_model_len: `{}`".format(deep_get(state, "pd.service_defaults.max_model_len")),
+        "- gpu_memory_utilization: `{}`".format(
+            deep_get(state, "pd.service_defaults.gpu_memory_utilization")
         ),
         "- Transfer: status=`{}` protocol=`{}` failure=`{}`".format(
             deep_get(state, "pd.transfer.status"),

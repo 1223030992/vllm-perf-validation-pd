@@ -1,0 +1,33 @@
+pd_profile:
+  name: glm51-w4a8-vllm018-mooncake
+  description: GLM-5.1-W4A8-V2_6 vLLM 0.18 Mooncake 1P1D
+model:
+  name: GLM-5.1-W4A8-V2_6
+  model_short: glm51-w4a8
+  container_model_path: /model/GLM-5.1-W4A8-V2_6
+  precision: w4a8
+pd:
+  backend: mooncake_vllm018
+  topology: 1p1d
+  mooncake_proxy_script: mooncake/examples/online_serving/disaggregated_serving/mooncake_connector/mooncake_connector_proxy.py
+  server_scripts:
+    prefill: scripts/pd-server/glm51-w4a8/p_server.sh
+    decode: scripts/pd-server/glm51-w4a8/d_server.sh
+    proxy: scripts/pd-server/glm51-w4a8/run_proxy.sh
+  runtime:
+    mooncake_wheel: null
+    mooncake_dest_device_affinity: true
+  service_defaults:
+    tp: 8
+    gpu_range: '0,1,2,3,4,5,6,7'
+    quantization: ''
+    dtype: bfloat16
+    max_num_batched_tokens: 8192
+    max_num_seqs: 64
+    gpu_memory_utilization: 0.92
+    max_model_len: 67000
+    speculative_config: '{ "method":"deepseek_mtp", "num_speculative_tokens":2}'
+    compilation_config: ''
+    extra_args: ''
+    prefill_extra_args: '--block-size 64 --kv-cache-dtype fp8_ds_mla'
+    decode_extra_args: '--block-size 64 --kv-cache-dtype fp8_ds_mla'

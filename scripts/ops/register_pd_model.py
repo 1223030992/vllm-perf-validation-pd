@@ -9,6 +9,12 @@ from pathlib import Path
 DEFAULT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def write_text_lf(path, content):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
+
+
 def yaml_scalar(value):
     if value is None:
         return "null"
@@ -142,8 +148,8 @@ def main():
         return 0
     profile_path.parent.mkdir(parents=True, exist_ok=True)
     preset_path.parent.mkdir(parents=True, exist_ok=True)
-    profile_path.write_text(profile_text, encoding="utf-8", newline="\n")
-    preset_path.write_text(preset_text, encoding="utf-8", newline="\n")
+    write_text_lf(profile_path, profile_text)
+    write_text_lf(preset_path, preset_text)
     print("PD_MODEL_REGISTER_DONE=1")
     return 0
 

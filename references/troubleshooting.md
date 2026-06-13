@@ -1,5 +1,19 @@
 # 故障排查
 
+## 调用被拒绝
+
+未知参数或参数值缺失会在 SSH、state 和容器操作前被拒绝：
+
+```text
+PD_INVOCATION_REJECTED=1
+TASK_STARTED=0
+FAILURE_STAGE=parse_arguments
+ARGUMENT_ERROR=...
+ARGUMENT_HINT=...
+```
+
+该输出表示没有启动任务。当前 Claude 对话中不得自动修正并重试，也不得调用 `show_state.sh`。应修正提示词中的唯一命令块后，在新的明确授权下重新执行。
+
 ## Preflight 分类
 
 | reason | 含义 |
@@ -10,7 +24,7 @@
 | `docker_permission_denied` | 当前用户无 Docker 权限 |
 | `docker_image_missing` | 指定镜像在节点不存在 |
 | `docker_image_id_mismatch` | P/D 镜像 ID 不一致或不符合预期 |
-| `host_model_path_missing` | Host 模型目录不存在 |
+| `host_model_path_missing` | Host 模型目录不存在；使用 `configure_pd_deployment.sh --update-existing --host-model-path <PATH>` 更新个人 deployment，或临时传 `run_pd_task.sh --host-model-path <PATH>`，不要编辑共享 profile |
 | `required_script_missing` | profile 指向的 P/D/Proxy 脚本不存在 |
 | `port_in_use` | 服务端口已被占用 |
 
@@ -21,6 +35,10 @@
 - `mooncake_transfer_engine_missing`：镜像未预装 Mooncake 且未传 wheel。
 - `mooncake_install_failed`：受控 wheel 安装失败。
 - 先核对 wheel 与 Python ABI、系统和 DTK 版本是否匹配。
+
+## KV Cache 容量
+
+`kv_cache_capacity_insufficient` 表示模型原生最大序列长度或配置的 `max_model_len` 超过当前 KV cache 容量。报告会记录模型最大长度、所需/可用 KV cache GiB 和 vLLM 估算上限。优先降低 `--max-model-len`；只有确认设备显存仍有余量时才提高 `--gpu-memory-utilization`。后续 all-reduce 或 worker terminated 日志不覆盖该第一根因。
 
 ## Proxy
 

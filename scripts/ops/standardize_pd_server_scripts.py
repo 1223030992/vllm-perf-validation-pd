@@ -33,6 +33,12 @@ def resolve(path):
     return Path(path).expanduser().resolve()
 
 
+def write_text_lf(path, content):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
+
+
 def command_tokens(text):
     lines = text.splitlines()
     start = None
@@ -54,11 +60,20 @@ def command_tokens(text):
         line = lines[index].strip()
         if array_mode and line == ")":
             break
+        continued = line.endswith("\\")
         if array_mode and line.endswith(")"):
             command.append(line[:-1].rstrip())
             break
-        command.append(line[:-1].rstrip() if line.endswith("\\") else line)
-        if not array_mode and not line.endswith("\\"):
+        command.append(line[:-1].rstrip() if continued else line)
+        joined = " ".join(command)
+        try:
+            shlex.split(joined[re.search(r"\bvllm\s+serve\b", joined).start():])
+            quote_complete = True
+        except ValueError as exc:
+            if "No closing quotation" not in str(exc):
+                raise
+            quote_complete = False
+        if not array_mode and quote_complete and not continued:
             break
         index += 1
     joined = " ".join(command)
@@ -82,7 +97,8 @@ def parse_role_script(path):
 
     values = {
         "model_path": model_path,
-        "gpu_range": assignments.get("HIP_VISIBLE_DEVICES", "0"),
+        "gpu_range": assignments.get("HIP_VISIBLE_DEVICES", ""),
+        "kv_role": "",
         "port": "8000",
         "tp": "1",
         "quantization": "",
@@ -110,6 +126,10 @@ def parse_role_script(path):
         if token in VALUE_FLAGS:
             if index + 1 >= len(tokens):
                 raise SystemExit("missing_flag_value={} in {}".format(token, path))
+            if token == "--kv-transfer-config":
+                role_match = re.search(r'["\']kv_role["\']\s*:\s*["\']([^"\']+)', tokens[index + 1])
+                if role_match:
+                    values["kv_role"] = role_match.group(1)
             if token in aliases:
                 values[aliases[token]] = tokens[index + 1]
             index += 2
@@ -132,6 +152,11 @@ def parse_role_script(path):
             values[key] = assignments.get(variable, "")
     if not values["tp"]:
         values["tp"] = "1"
+    if not values["gpu_range"]:
+        try:
+            values["gpu_range"] = ",".join(str(index) for index in range(int(values["tp"])))
+        except (TypeError, ValueError):
+            values["gpu_range"] = "0"
     if not values["port"]:
         values["port"] = "8000"
     if not values["dtype"]:
@@ -299,7 +324,7 @@ def main():
     target.mkdir(parents=True, exist_ok=True)
     for name, content in contents.items():
         destination = target / name
-        destination.write_text(content, encoding="utf-8", newline="\n")
+        write_text_lf(destination, content)
         os.chmod(str(destination), 0o755)
     if args.preserve_raw:
         raw = target / "raw"

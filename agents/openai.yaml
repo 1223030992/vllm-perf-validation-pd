@@ -1,7 +1,7 @@
 interface:
   display_name: "vLLM Mooncake PD 验证"
   short_description: "通过受控入口执行 Mooncake 1P1D 性能测试并快速接入新模型"
-  default_prompt: "使用 $vllm-perf-validation-pd 按 profile、deployment 和 test preset 直接执行一次受控 PD 测试；真实运行不自动 dry-run，成功后只根据主入口摘要汇报。"
+  default_prompt: "使用 $vllm-perf-validation-pd 原样执行用户提供的唯一 run_pd_task.sh 命令一次。临时节点或参数覆盖必须已经写在命令块中，不得从验收说明推导或补充 CLI；以 SSH 前 EFFECTIVE_CONFIG_READY 到 EFFECTIVE_CONFIG_END 的摘要为准。真实运行不自动 dry-run；若 PD_INVOCATION_REJECTED=1 或没有 STATE_HOST，立即停止且不得重试；只有运行期失败并输出 STATE_HOST 时才调用一次 show_state.sh。"
 
 policy:
   allow_implicit_invocation: false

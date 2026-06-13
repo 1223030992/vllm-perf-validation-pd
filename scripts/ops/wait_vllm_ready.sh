@@ -54,29 +54,15 @@ set -euo pipefail
 ROLE=$(quote_sh "$ROLE"); PORT=$(quote_sh "$PORT"); LOG=$(quote_sh "$LOG"); MODEL_PATH=$(quote_sh "$MODEL_PATH")
 STATE=$(quote_sh "$STATE"); TIMEOUT=$(quote_sh "$TIMEOUT"); INTERVAL=$(quote_sh "$INTERVAL")
 SKILL_CONTAINER_ROOT=$(quote_sh "$SKILL_CONTAINER_ROOT"); PID_FILE=\${LOG%.log}.pid
-FAIL_RE='Traceback|ImportError|ModuleNotFoundError|RuntimeError|Killed|OOM|out[[:space:]]of[[:space:]]memory|hipError|ROCm[[:space:]]error'
+FAIL_RE='Traceback|ValueError: To serve at least one request|ImportError|ModuleNotFoundError|RuntimeError|Killed|OOM|out[[:space:]]of[[:space:]]memory|hipError|ROCm[[:space:]]error'
 START_TS=\$(date +%s); LAST_LOG=""; LAST_HEALTH_CODE=""; LAST_MODELS_JSON=""
 
-classify_log_failure() {
-  local text="\$1"
-  if printf '%s' "\$text" | grep -Eqi 'Please install mooncake|No module named .mooncake|mooncake_transfer_engine'; then
-    printf '%s\n' mooncake_transfer_engine_missing
-  elif printf '%s' "\$text" | grep -Eqi 'ModuleNotFoundError|ImportError|No module named'; then
-    printf '%s\n' python_dependency_missing
-  elif printf '%s' "\$text" | grep -Eqi 'out[[:space:]]of[[:space:]]memory|OOM|Killed'; then
-    printf '%s\n' out_of_memory
-  else
-    printf '%s\n' log_failure_signal
-  fi
-}
-
-record_role_failure() {
-  local reason="\$1" summary
-  summary=\$(printf '%s\n' "\$LAST_LOG" | tail -40 | head -c 4000)
-  python3 "\$SKILL_CONTAINER_ROOT/scripts/ops/update_state.py" --state "\$STATE" \
-    --set "status=SERVICE_FAILED" --set "pd.roles.\$ROLE.status=FAILED" \
-    --set "failure.reason=\$reason" --set "failure.detail=\$ROLE" \
-    --set "pd.roles.\$ROLE.log_tail=\$summary"
+diagnose_role_failure() {
+  local fallback_reason="\$1" diagnostic reason
+  diagnostic=\$(python3 "\$SKILL_CONTAINER_ROOT/scripts/ops/vllm_failure_diagnostics.py" \
+    --state "\$STATE" --role "\$ROLE" --log "\$LOG" --fallback-reason "\$fallback_reason")
+  reason=\$(printf '%s\n' "\$diagnostic" | sed -n 's/^FAILURE_REASON=//p' | tail -1)
+  printf '%s\n' "\${reason:-\$fallback_reason}"
 }
 
 python3 "\$SKILL_CONTAINER_ROOT/scripts/ops/update_state.py" --state "\$STATE" --set "status=WAITING_READY" --set "pd.roles.\$ROLE.status=WAITING_READY" --set "pd.roles.\$ROLE.readiness_start_epoch=\$START_TS" --set "pd.roles.\$ROLE.readiness_timeout_seconds=\$TIMEOUT"
@@ -86,16 +72,13 @@ while true; do
   LOG_TAIL=\$(tail -100 "\$LOG" 2>/dev/null || true); LAST_LOG="\$LOG_TAIL"
 
   if [[ "\$LOG_TAIL" =~ \$FAIL_RE ]]; then
-    REASON=\$(classify_log_failure "\$LOG_TAIL")
-    record_role_failure "\$REASON"
+    REASON=\$(diagnose_role_failure log_failure_signal)
     echo "SERVICE_LOG_FAILURE role=\$ROLE reason=\$REASON" >&2; echo "\$LOG_TAIL"; exit 1
   fi
   if [[ -f "\$PID_FILE" ]]; then
     PID=\$(cat "\$PID_FILE" 2>/dev/null || true)
     if [[ -n "\$PID" ]] && ! kill -0 "\$PID" 2>/dev/null; then
-      REASON=\$(classify_log_failure "\$LOG_TAIL")
-      [[ "\$REASON" != "log_failure_signal" ]] || REASON=service_process_exited
-      record_role_failure "\$REASON"
+      REASON=\$(diagnose_role_failure service_process_exited)
       echo "SERVICE_PROCESS_EXITED role=\$ROLE reason=\$REASON" >&2; echo "\$LOG_TAIL"; exit 1
     fi
   fi

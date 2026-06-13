@@ -51,6 +51,26 @@ class PdModelOnboardingTest(unittest.TestCase):
             self.assertIn("PD_SERVER_STANDARDIZE_DRY_RUN_DONE=1", result.stdout)
             self.assertFalse((Path(tmp) / "scripts" / "pd-server" / "testw8a8").exists())
 
+    def test_parser_supports_multiline_json_and_infers_gpu_range_from_tp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = Path(tmp) / "role.sh"
+            script.write_text(textwrap.dedent("""
+                export MODEL_OPT=1
+                vllm serve /model/Test-W4A8 \\
+                  -tp 4 --dtype bfloat16 \\
+                  --speculative_config '{
+                    "method":"deepseek_mtp",
+                    "num_speculative_tokens":2}' \\
+                  --kv-cache-dtype fp8_ds_mla \\
+                  --kv-transfer-config '{"kv_connector":"MooncakeConnector","kv_role":"kv_consumer"}'
+            """).strip() + "\n", encoding="utf-8")
+            sys.path.insert(0, str(ROOT / "ops"))
+            from standardize_pd_server_scripts import parse_role_script
+            parsed = parse_role_script(script)
+            self.assertEqual(parsed["gpu_range"], "0,1,2,3")
+            self.assertIn('"method":"deepseek_mtp"', parsed["speculative_config"])
+            self.assertEqual(parsed["extras"], ["--kv-cache-dtype", "fp8_ds_mla"])
+
     def test_register_generates_profile_and_smoke_preset_without_deployment(self):
         with tempfile.TemporaryDirectory() as tmp:
             sources = self.prepare_sources(tmp)

@@ -8,7 +8,6 @@
 model:
   name: <MODEL_NAME>
   model_short: <MODEL_SHORT>
-  host_model_path: <HOST_MODEL_PATH>
   container_model_path: <CONTAINER_MODEL_PATH>
   precision: <PRECISION>
 pd:
@@ -26,6 +25,8 @@ pd:
     gpu_range: "0,1,2,3,4,5,6,7"
     quantization: <QUANTIZATION>
     dtype: bfloat16
+    max_model_len: <POSITIVE_INTEGER_OR_EMPTY>
+    gpu_memory_utilization: <FLOAT_0_TO_1_OR_EMPTY>
 ```
 
 ## Deployment
@@ -33,6 +34,8 @@ pd:
 ```yaml
 deployment:
   id: <DEPLOYMENT_ID>
+model:
+  host_model_path: <HOST_MODEL_PATH>
 pd:
   network:
     ifname: <IFNAME>
@@ -54,7 +57,7 @@ pd:
     port: 8000
 ```
 
-网卡和 HCA 探测仅告警。节点、service IP 和 `VLLM_HOST_IP` 缺失时在 SSH 前失败。
+`model.host_model_path` 推荐保存在用户 deployment；旧 profile 中的同名字段仅作为兼容默认值。网卡和 HCA 探测仅告警。Host 模型路径、节点、service IP 和 `VLLM_HOST_IP` 缺失时在 SSH 前失败。
 
 ## Test preset
 
@@ -93,5 +96,7 @@ test:
 ```text
 CLI > legacy --config > test preset > deployment > model profile > default
 ```
+
+`run_pd_task.sh` 可使用 `--max-model-len` 和 `--gpu-memory-utilization` 覆盖 model profile。custom/pchit 的最大输入长度加输出长度不得超过最终 `max_model_len`。
 
 真实镜像必须通过 `--image` 提供。新模型使用 `onboard_pd_model.sh` 接入，不复制已有 GLM profile。

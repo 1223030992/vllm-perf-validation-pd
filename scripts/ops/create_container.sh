@@ -42,6 +42,7 @@ OUTPUT_CONTAINER_ROOT="${OUTPUT_CONTAINER_ROOT:-}"
 DATE_PART="$(date +%m%d)"
 IMAGE_PREFIX=""
 CONTAINER_NAME=""
+CONTAINER_NAME_EXPLICIT=0
 HOST_MODEL_PATH=""
 CONTAINER_MODEL_PATH=""
 CONTAINER_PREFIX=""
@@ -95,7 +96,7 @@ while [[ $# -gt 0 ]]; do
     --model-short) MODEL_SHORT="$2"; shift 2 ;;
     --date) DATE_PART="$2"; shift 2 ;;
     --image-prefix) IMAGE_PREFIX="$2"; shift 2 ;;
-    --name) CONTAINER_NAME="$2"; shift 2 ;;
+    --name) CONTAINER_NAME="$2"; CONTAINER_NAME_EXPLICIT=1; shift 2 ;;
     --host-model-path) HOST_MODEL_PATH="$2"; shift 2 ;;
     --container-model-path) CONTAINER_MODEL_PATH="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -126,10 +127,11 @@ if [[ -z "$CONTAINER_NAME" ]]; then
   CONTAINER_NAME="${CONTAINER_PREFIX}-${DATE_PART}-${MODEL_SHORT}-${IMAGE_PREFIX}"
 fi
 
-if ! [[ "$CONTAINER_NAME" =~ ^${CONTAINER_PREFIX}-[0-9]{4}-[a-z0-9-]+-[A-Za-z0-9]{4,}$ ]]; then
-  echo "Container name does not match convention: $CONTAINER_NAME" >&2
-  echo "Expected: ${CONTAINER_PREFIX}-<MMDD>-<MODEL_SHORT>-<IMAGE_PREFIX>" >&2
-  exit 2
+if [[ "$CONTAINER_NAME_EXPLICIT" == "1" ]]; then
+  python3 "$SCRIPT_DIR/container_name.py" --name "$CONTAINER_NAME" --prefix "$CONTAINER_PREFIX"
+else
+  python3 "$SCRIPT_DIR/container_name.py" --name "$CONTAINER_NAME" --prefix "$CONTAINER_PREFIX" \
+    --legacy --date "$DATE_PART" --model-short "$MODEL_SHORT" --image-prefix "$IMAGE_PREFIX"
 fi
 
 remote_check="docker ps -a --format '{{.Names}}' | grep -Fx '$CONTAINER_NAME'"

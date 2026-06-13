@@ -7,6 +7,13 @@ source "$SCRIPT_DIR/version.sh"
 SCRIPT_VERSION="$OPS_VERSION"
 echo "PD_SCRIPT_VERSION=$SCRIPT_VERSION"
 
+if python3 "$SCRIPT_DIR/pd_invocation_contract.py" "$@"; then
+  :
+else
+  invocation_rc=$?
+  exit "$invocation_rc"
+fi
+
 usage() {
   cat <<'USAGE'
 Usage:
@@ -14,6 +21,7 @@ Usage:
     --user USER --abbr ABBR \
     [--assume-yes] [--dry-run] --image IMAGE [--image-id IMAGE_ID] \
     [--mooncake-wheel URL_OR_CONTAINER_PATH] \
+    [--max-model-len N] [--gpu-memory-utilization VALUE] \
     [--image-prefix PREFIX] \
     [--host-model-path PATH] [--container-model-path PATH] \
     [--prefill-node IP] [--prefill-service-ip IP] [--prefill-vllm-host-ip IP] \
@@ -150,6 +158,7 @@ run_stage() {
 CONFIG=""; PROFILE=""; DEPLOYMENT=""; TEST_PRESET=""; CLEANUP_STATE=""; ASSUME_YES=0; DRY_RUN=0; VERBOSE_DRY_RUN=0; KEEP_CONTAINERS_ON_FAILURE=0
 IMAGE_ARG=""; EXPECTED_IMAGE_ID=""; IMAGE_PREFIX=""; MOONCAKE_WHEEL_ARG=""; DATE_PART="$(date +%m%d)"; RUN_ID=""
 HOST_MODEL_PATH_ARG=""; CONTAINER_MODEL_PATH_ARG=""
+MAX_MODEL_LEN_ARG=""; GPU_MEMORY_UTILIZATION_ARG=""
 PREFILL_NODE_ARG=""; PREFILL_SERVICE_IP_ARG=""; PREFILL_VLLM_HOST_IP_ARG=""; PREFILL_PORT_ARG=""; PREFILL_TRANSFER_PORT_ARG=""
 DECODE_NODE_ARG=""; DECODE_SERVICE_IP_ARG=""; DECODE_VLLM_HOST_IP_ARG=""; DECODE_PORT_ARG=""
 PROXY_PORT_ARG=""; NETWORK_IFNAME_ARG=""; NCCL_IB_HCA_ARG=""; MOONCAKE_DEST_DEVICE_AFFINITY_ARG=""
@@ -178,6 +187,8 @@ while [[ $# -gt 0 ]]; do
     --image-prefix) IMAGE_PREFIX="$2"; shift 2 ;;
     --host-model-path) HOST_MODEL_PATH_ARG="$2"; shift 2 ;;
     --container-model-path) CONTAINER_MODEL_PATH_ARG="$2"; shift 2 ;;
+    --max-model-len) MAX_MODEL_LEN_ARG="$2"; shift 2 ;;
+    --gpu-memory-utilization) GPU_MEMORY_UTILIZATION_ARG="$2"; shift 2 ;;
     --prefill-node) PREFILL_NODE_ARG="$2"; shift 2 ;;
     --prefill-service-ip) PREFILL_SERVICE_IP_ARG="$2"; shift 2 ;;
     --prefill-vllm-host-ip) PREFILL_VLLM_HOST_IP_ARG="$2"; shift 2 ;;
@@ -215,7 +226,10 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=1; shift ;;
     --verbose-dry-run) DRY_RUN=1; VERBOSE_DRY_RUN=1; shift ;;
     --help) usage; exit 0 ;;
-    *) echo "unknown_arg=$1" >&2; usage; exit 2 ;;
+    *)
+      python3 "$SCRIPT_DIR/pd_invocation_contract.py" "$1" || true
+      exit 2
+      ;;
   esac
 done
 
@@ -291,8 +305,9 @@ MOONCAKE_PROXY_SCRIPT="${PD_MOONCAKE_PROXY_SCRIPT:-mooncake/examples/online_serv
 TP="${PD_SERVICE_DEFAULTS_TP:-1}"; GPU_RANGE="${PD_SERVICE_DEFAULTS_GPU_RANGE:-0}"
 QUANTIZATION="${PD_SERVICE_DEFAULTS_QUANTIZATION:-}"; DTYPE="${PD_SERVICE_DEFAULTS_DTYPE:-auto}"
 MAX_NUM_BATCHED_TOKENS="${PD_SERVICE_DEFAULTS_MAX_NUM_BATCHED_TOKENS:-}"
-MAX_NUM_SEQS="${PD_SERVICE_DEFAULTS_MAX_NUM_SEQS:-}"; GPU_MEMORY_UTILIZATION="${PD_SERVICE_DEFAULTS_GPU_MEMORY_UTILIZATION:-}"
-MAX_MODEL_LEN="${PD_SERVICE_DEFAULTS_MAX_MODEL_LEN:-}"
+MAX_NUM_SEQS="${PD_SERVICE_DEFAULTS_MAX_NUM_SEQS:-}"
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION_ARG:-${PD_SERVICE_DEFAULTS_GPU_MEMORY_UTILIZATION:-}}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN_ARG:-${PD_SERVICE_DEFAULTS_MAX_MODEL_LEN:-}}"
 SPECULATIVE_CONFIG="${PD_SERVICE_DEFAULTS_SPECULATIVE_CONFIG:-}"
 COMPILATION_CONFIG="${PD_SERVICE_DEFAULTS_COMPILATION_CONFIG:-}"
 EXTRA_ARGS="${PD_SERVICE_DEFAULTS_EXTRA_ARGS:-}"
@@ -356,6 +371,15 @@ if [[ "$TEST_MODE" == "pchit" ]]; then
   [[ "$PCHIT_TPOT_SLA_MS" =~ ^[1-9][0-9]*$ ]] || { echo "invalid_tpot_sla_ms=$PCHIT_TPOT_SLA_MS" >&2; exit 2; }
   [[ "$PCHIT_SLA_STAT" == "mean" || "$PCHIT_SLA_STAT" == "p95" || "$PCHIT_SLA_STAT" == "p99" ]] || { echo "invalid_sla_stat=$PCHIT_SLA_STAT" >&2; exit 2; }
 fi
+if [[ "$TEST_MODE" == "custom" ]]; then
+  LIMIT_INPUT_LENS="$CUSTOM_INPUT_LENS"; LIMIT_OUTPUT_LEN="$CUSTOM_OUTPUT_LEN"
+else
+  LIMIT_INPUT_LENS="$PCHIT_INPUT_LEN"; LIMIT_OUTPUT_LEN="$PCHIT_OUTPUT_LEN"
+fi
+python3 "$SCRIPT_DIR/validate_runtime_limits.py" \
+  --max-model-len "$MAX_MODEL_LEN" \
+  --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+  --test-mode "$TEST_MODE" --input-lens "$LIMIT_INPUT_LENS" --output-len "$LIMIT_OUTPUT_LEN"
 for numeric_arg in READY_TIMEOUT PROXY_TIMEOUT PROXY_REQUEST_TIMEOUT BENCH_TIMEOUT INTERVAL; do
   [[ "${!numeric_arg}" =~ ^[1-9][0-9]*$ ]] || { echo "invalid_${numeric_arg,,}=${!numeric_arg}" >&2; exit 2; }
 done
@@ -417,11 +441,29 @@ else
 fi
 
 cat <<EOF
+EFFECTIVE_CONFIG_READY=1
 SELECTED_IMAGE=$IMAGE
 EXPECTED_IMAGE_ID=${EXPECTED_IMAGE_ID:-not_set}
 MOONCAKE_WHEEL=${MOONCAKE_WHEEL:-not_set}
 MOONCAKE_DEST_DEVICE_AFFINITY=$MOONCAKE_DEST_DEVICE_AFFINITY
+MAX_MODEL_LEN=${MAX_MODEL_LEN:-not_set}
+GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-not_set}
 BENCH_TIMEOUT=$BENCH_TIMEOUT
+HOST_MODEL_PATH=$HOST_MODEL_PATH
+CONTAINER_MODEL_PATH=$CONTAINER_MODEL_PATH
+PREFILL_NODE=$PREFILL_NODE
+PREFILL_SERVICE_IP=$PREFILL_SERVICE_IP
+PREFILL_VLLM_HOST_IP=$PREFILL_VLLM_HOST_IP
+PREFILL_PORT=$PREFILL_PORT
+PREFILL_TRANSFER_PORT=$PREFILL_TRANSFER_PORT
+DECODE_NODE=$DECODE_NODE
+DECODE_SERVICE_IP=$DECODE_SERVICE_IP
+DECODE_VLLM_HOST_IP=$DECODE_VLLM_HOST_IP
+DECODE_PORT=$DECODE_PORT
+PROXY_NODE=$PROXY_NODE
+PROXY_PORT=$PROXY_PORT
+NETWORK_IFNAME=${NETWORK_IFNAME:-not_set}
+NCCL_IB_HCA=${NCCL_IB_HCA:-not_set}
 TASK_RUN_ID=$RUN_ID
 INVOCATION_ID=$INVOCATION_ID
 PD_BACKEND=$PD_BACKEND
@@ -438,6 +480,7 @@ PCHIT_OUTPUT_LEN=${PCHIT_OUTPUT_LEN:-not_applicable}
 PCHIT_BATCHES=${PCHIT_BATCHES:-not_applicable}
 WORK_DIR_HOST=$WORK_DIR_HOST
 STATE_HOST=$STATE_HOST
+EFFECTIVE_CONFIG_END=1
 EOF
 
 if [[ "$DRY_RUN" == "0" ]]; then
@@ -446,6 +489,8 @@ if [[ "$DRY_RUN" == "0" ]]; then
     --set "pd.backend=$PD_BACKEND" --set "pd.topology=$PD_TOPOLOGY" \
     --set "pd.runtime.mooncake_wheel=$MOONCAKE_WHEEL" \
     --set "pd.runtime.mooncake_dest_device_affinity=$MOONCAKE_DEST_DEVICE_AFFINITY" \
+    --set "pd.service_defaults.max_model_len=$MAX_MODEL_LEN" \
+    --set "pd.service_defaults.gpu_memory_utilization=$GPU_MEMORY_UTILIZATION" \
     --set "pd.roles.prefill.node=$PREFILL_NODE" --set "pd.roles.prefill.service_ip=$PREFILL_SERVICE_IP" --set "pd.roles.prefill.vllm_host_ip=$PREFILL_VLLM_HOST_IP" --set "pd.roles.prefill.port=$PREFILL_PORT" --set "pd.roles.prefill.transfer_port=$PREFILL_TRANSFER_PORT" --set "pd.roles.prefill.container=$PREFILL_CONTAINER" \
     --set "pd.roles.decode.node=$DECODE_NODE" --set "pd.roles.decode.service_ip=$DECODE_SERVICE_IP" --set "pd.roles.decode.vllm_host_ip=$DECODE_VLLM_HOST_IP" --set "pd.roles.decode.port=$DECODE_PORT" --set "pd.roles.decode.container=$DECODE_CONTAINER" \
     --set "pd.proxy.node=$PROXY_NODE" --set "pd.proxy.container=$PROXY_CONTAINER" --set "pd.proxy.port=$PROXY_PORT" \
